@@ -1,0 +1,153 @@
+/* 
+ * Extracted CSS from IsoPepTracker Shiny Application
+ * Originally embedded in global.R and ui.R
+ * Consolidated and organized for better maintainability
+ */
+
+/* =================================================================
+   WRAPPER AND CONTAINER FIXES
+   ================================================================= */
+.content-wrapper, .right-side {
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+}
+
+/* =================================================================
+   BOX SIZING AND OVERFLOW HANDLING
+   ================================================================= */
+.box-body {
+  overflow-x: auto !important;
+  padding: 10px !important;
+}
+
+/* =================================================================
+   PLOT CONTAINER RESPONSIVENESS
+   ================================================================= */
+.plotly {
+  min-height: 600px !important;
+  width: 100% !important;
+}
+
+/* Force plot containers to be responsive */
+.plot-container.plotly, .js-plotly-plot {
+  width: 100% !important;
+}
+
+/* =================================================================
+   TABLE RESPONSIVENESS
+   ================================================================= */
+.dataTables_wrapper {
+  width: 100% !important;
+  overflow-x: auto !important;
+}
+
+/* =================================================================
+   DASHBOARD CONTENT AREA
+   ================================================================= */
+.content {
+  padding: 15px !important;
+}
+
+/* =================================================================
+   BOX MARGINS AND PADDING
+   ================================================================= */
+.box {
+  margin-bottom: 15px !important;
+  overflow: hidden !important;
+}
+
+/* =================================================================
+   TAB CONTENT
+   ================================================================= */
+.tab-content {
+  padding: 10px 0 !important;
+}
+
+/* =================================================================
+   LEGEND POSITIONING
+   ================================================================= */
+.legend {
+  position: relative !important;
+  margin-top: 10px !important;
+}
+
+/* =================================================================
+   ANALYSIS VIEW STYLING
+   ================================================================= */
+.analysis-container {
+  padding: 20px;
+  margin: 0;
+  min-height: 100vh;
+  background: #f4f4f4;
+}
+
+.view-header {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 20px 30px;
+  margin: -20px -20px 20px -20px;
+  border-radius: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.view-title {
+  font-size: 1.8rem;
+  font-weight: 300;
+  margin: 0;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.3);
+}
+
+.back-btn {
+  background: rgba(255, 255, 255, 0.2) !important;
+  border: 1px solid rgba(255, 255, 255, 0.3) !important;
+  color: white !important;
+  padding: 8px 16px !important;
+  border-radius: 20px !important;
+  font-size: 0.9rem !important;
+  transition: all 0.3s ease !important;
+}
+
+.back-btn:hover {
+  background: rgba(255, 255, 255, 0.3) !important;
+  color: white !important;
+  text-decoration: none !important;
+}
+
+/* =================================================================
+   TAB NAVIGATION STYLING
+   ================================================================= */
+.tab-btn {
+  background: #ffffff !important;
+  color: #666 !important;
+  border: 1px solid #ddd !important;
+}
+
+.tab-btn:hover {
+  background: #f8f9fa !important;
+  color: #333 !important;
+}
+
+.tab-btn.active {
+  background: #667eea !important;
+  color: white !important;
+  border-color: #667eea !important;
+}
+
+/* =================================================================
+   MOBILE RESPONSIVENESS
+   ================================================================= */
+@media (max-width: 768px) {
+  .card-grid {
+    grid-template-columns: 1fr !important;
+    grid-template-rows: auto !important;
+    max-width: 400px !important;
+    gap: 20px !important;
+  }
+  
+  .card-grid > div {
+    width: 100% !important;
+    max-width: 350px !important;
+  }
+}

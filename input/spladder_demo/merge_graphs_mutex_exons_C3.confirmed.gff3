@@ -1,0 +1,19 @@
+##gff-version 3
+1	mutex_exons	gene	113952766	113955649	.	+	.	ID=mutex_exons.82;GeneName="ENSG00000163349";HasNovelJunction="Y"
+1	mutex_exons	mRNA	113952766	113955649	.	+	.	ID=mutex_exons.82_iso1;Parent=mutex_exons.82;GeneName="ENSG00000163349";HasNovelJunction="Y"
+1	mutex_exons	exon	113952766	113952889	.	+	.	Parent=mutex_exons.82_iso1
+1	mutex_exons	exon	113953877	113953932	.	+	.	Parent=mutex_exons.82_iso1
+1	mutex_exons	exon	113955563	113955649	.	+	.	Parent=mutex_exons.82_iso1
+1	mutex_exons	mRNA	113952766	113955649	.	+	.	ID=mutex_exons.82_iso2;Parent=mutex_exons.82;GeneName="ENSG00000163349";HasNovelJunction="N"
+1	mutex_exons	exon	113952766	113952889	.	+	.	Parent=mutex_exons.82_iso2
+1	mutex_exons	exon	113954651	113954770	.	+	.	Parent=mutex_exons.82_iso2
+1	mutex_exons	exon	113955563	113955649	.	+	.	Parent=mutex_exons.82_iso2
+5	mutex_exons	gene	179794033	179796314	.	+	.	ID=mutex_exons.2307;GeneName="ENSG00000213316";HasNovelJunction="Y"
+5	mutex_exons	mRNA	179794033	179796314	.	+	.	ID=mutex_exons.2307_iso1;Parent=mutex_exons.2307;GeneName="ENSG00000213316";HasNovelJunction="Y"
+5	mutex_exons	exon	179794033	179794138	.	+	.	Parent=mutex_exons.2307_iso1
+5	mutex_exons	exon	179795308	179795340	.	+	.	Parent=mutex_exons.2307_iso1
+5	mutex_exons	exon	179796253	179796314	.	+	.	Parent=mutex_exons.2307_iso1
+5	mutex_exons	mRNA	179794033	179796314	.	+	.	ID=mutex_exons.2307_iso2;Parent=mutex_exons.2307;GeneName="ENSG00000213316";HasNovelJunction="Y"
+5	mutex_exons	exon	179794033	179794138	.	+	.	Parent=mutex_exons.2307_iso2
+5	mutex_exons	exon	179795584	179796159	.	+	.	Parent=mutex_exons.2307_iso2
+5	mutex_exons	exon	179796253	179796314	.	+	.	Parent=mutex_exons.2307_iso2
