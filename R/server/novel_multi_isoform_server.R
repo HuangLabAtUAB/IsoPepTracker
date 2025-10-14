@@ -320,7 +320,7 @@ observeEvent(input$novel_compare_isoforms, {
 novel_multi_isoform_data <- reactive({
   req(input$run_novel_comparative_analysis > 0, input$novel_protease, input$novel_miscleavage_type, 
       novel_merged_data(), input$novel_compare_isoforms, 
-      length(input$novel_compare_isoforms) >= 2, length(input$novel_compare_isoforms) <= 8)
+      length(input$novel_compare_isoforms) >= 2)
   
   withProgress(message = 'Loading novel multi-isoform analysis...', value = 0, {
     protease <- input$novel_protease
@@ -469,7 +469,7 @@ output$novel_comparative_plot <- renderPlotly({
       p <- plotly::plot_ly() %>%
         plotly::add_annotations(
           x = 0.5, y = 0.5,
-          text = "No comparative data available. Please select 2-8 isoforms and run analysis.",
+          text = "No comparative data available. Please select 2 or more isoforms and run analysis.",
           showarrow = FALSE,
           font = list(size = 16)
         ) %>%
@@ -1132,7 +1132,7 @@ output$download_novel_peptides_analysis <- downloadHandler(
 # Multi-Isoform data loader (exact copy of all_isoforms_data but triggered by run_comparative_analysis)
 multi_isoform_data <- reactive({
   req(input$run_comparative_analysis > 0, input$gene, input$protease, input$miscleavage_type, gene_data(),
-      input$compare_isoforms, length(input$compare_isoforms) >= 2, length(input$compare_isoforms) <= 8)
+      input$compare_isoforms, length(input$compare_isoforms) >= 2)
   
   withProgress(message = 'Loading multi-isoform analysis...', value = 0, {
     gene_id <- input$gene
@@ -1293,7 +1293,7 @@ observeEvent(input$compare_isoforms, {
 
 # Reactive for comparative analysis data - Using same approach as highlighted_isoform_data
 comparative_analysis_data <- eventReactive(input$run_comparative_analysis, {
-  req(input$compare_isoforms, length(input$compare_isoforms) >= 2, length(input$compare_isoforms) <= 8,
+  req(input$compare_isoforms, length(input$compare_isoforms) >= 2,
       all_isoforms_data())
   
   withProgress(message = 'Running comparative analysis...', value = 0, {
@@ -1774,7 +1774,7 @@ output$comparative_analysis_status <- renderUI({
   if (selected_count == 0) {
     div(
       style = "color: #999; font-style: italic; margin-top: 10px;",
-      "Please select 2-8 isoforms to compare"
+      "Please select 2 or more isoforms to compare"
   )
   } else if (selected_count == 1) {
     div(

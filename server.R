@@ -3935,11 +3935,11 @@ server <- function(input, output, session) {
     cat("  spladder_compare_isoforms:", paste(input$spladder_compare_isoforms, collapse = ", "), "\n")
     cat("  spladder_compare_isoforms length:", length(input$spladder_compare_isoforms), "\n")
     cat("  Length >= 2:", length(input$spladder_compare_isoforms) >= 2, "\n")
-    cat("  Length <= 8:", length(input$spladder_compare_isoforms) <= 8, "\n")
+    cat("  Length >= 2:", length(input$spladder_compare_isoforms) >= 2, "\n")
     
     req(input$run_spladder_comparative_analysis > 0, input$spladder_protease, input$spladder_miscleavage_type, 
         spladder_merged_data(), input$spladder_compare_isoforms, 
-        length(input$spladder_compare_isoforms) >= 2, length(input$spladder_compare_isoforms) <= 8)
+        length(input$spladder_compare_isoforms) >= 2)
     
     withProgress(message = 'Loading SplAdder multi-isoform analysis...', value = 0, {
       protease <- input$spladder_protease
@@ -4099,7 +4099,7 @@ server <- function(input, output, session) {
         p <- plotly::plot_ly() %>%
           plotly::add_annotations(
             x = 0.5, y = 0.5,
-            text = "No comparative data available. Please select 2-8 isoforms and run analysis.",
+            text = "No comparative data available. Please select 2 or more isoforms and run analysis.",
             showarrow = FALSE,
             font = list(size = 16)
           ) %>%
@@ -4592,7 +4592,7 @@ server <- function(input, output, session) {
   # SplAdder comparative analysis observer
   observeEvent(input$run_spladder_comparative_analysis, {
     req(input$spladder_compare_isoforms, length(input$spladder_compare_isoforms) >= 2, 
-        length(input$spladder_compare_isoforms) <= 8, spladder_merged_data())
+        length(input$spladder_compare_isoforms) >= 2, spladder_merged_data())
     
     withProgress(message = 'Running SplAdder comparative analysis...', value = 0, {
       selected_isoforms <- input$spladder_compare_isoforms

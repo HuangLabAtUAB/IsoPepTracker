@@ -153,8 +153,8 @@ create_as_view <- function(exons_result, gene_id, gene_symbol, as_database) {
           y_pos = i + 1.5,
           hover_text = clean_hover_text(paste0(
             hover_prefix, "<br>",
-            event$eventID, "<br>",
-            "Original position: ", start(range), "-", end(range)
+            "Event ID: ", event$eventID, "<br>",
+            "Position: ", start(range), "-", end(range)
           )),
           stringsAsFactors = FALSE
         )
@@ -242,7 +242,7 @@ create_as_view <- function(exons_result, gene_id, gene_symbol, as_database) {
       geom_rect(data = event_df,
                aes(xmin = start, xmax = end,
                    ymin = y_pos - 0.2, ymax = y_pos + 0.2,
-                   fill = type),
+                   fill = type, text = hover_text),
                color = "black", alpha = 0.8) +
       
       scale_fill_manual(

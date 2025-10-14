@@ -146,7 +146,7 @@ create_multi_isoform_comparison_module <- function(input, output, session, proce
   # Multi-Isoform data loader
   multi_isoform_data <- reactive({
     req(input$run_comparative_analysis > 0, input$gene, input$protease, input$miscleavage_type, gene_data(),
-        input$compare_isoforms, length(input$compare_isoforms) >= 2, length(input$compare_isoforms) <= 8)
+        input$compare_isoforms, length(input$compare_isoforms) >= 2)
     
     withProgress(message = 'Loading multi-isoform analysis...', value = 0, {
       gene_id <- input$gene
@@ -835,7 +835,7 @@ create_multi_isoform_comparison_module <- function(input, output, session, proce
     if (selected_count == 0) {
       div(
         style = "color: #666; margin-top: 10px;",
-        "Please select 2-8 isoforms for comparison."
+        "Please select 2 or more isoforms for comparison."
       )
     } else if (selected_count == 1) {
       div(
@@ -845,7 +845,7 @@ create_multi_isoform_comparison_module <- function(input, output, session, proce
     } else if (selected_count > 8) {
       div(
         style = "color: #cc0000; margin-top: 10px;",
-        paste("Selected", selected_count, "isoforms. Maximum 8 allowed for performance reasons.")
+        paste("Selected", selected_count, "isoforms.")
       )
     } else {
       div(
@@ -916,7 +916,7 @@ create_multi_isoform_comparison_module <- function(input, output, session, proce
     list(
       has_data = !is.null(data),
       selected_count = length(comparison_isoforms()),
-      ready_for_analysis = length(comparison_isoforms()) >= 2 && length(comparison_isoforms()) <= 8,
+      ready_for_analysis = length(comparison_isoforms()) >= 2,
       total_peptides = if (!is.null(data) && !is.null(data$all_peptides)) nrow(data$all_peptides) else 0
     )
   }

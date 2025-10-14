@@ -4062,11 +4062,6 @@ spladder_multi_isoform_data <- reactive({
     return(NULL)
   }
   
-  if (length(input$spladder_compare_isoforms) > 8) {
-    cat("DEBUG: Too many isoforms selected:", length(input$spladder_compare_isoforms), "\n")
-    showNotification("Please select no more than 8 isoforms for comparison", type = "warning")
-    return(NULL)
-  }
   
   cat("DEBUG: All validations passed, proceeding with analysis\n")
   
@@ -4214,7 +4209,7 @@ observeEvent(input$run_spladder_comparative_analysis, {
   # Check all requirements before processing
   if (is.null(input$spladder_protease) || is.null(input$spladder_miscleavage_type) || 
       is.null(rmats_merged_data()) || is.null(input$spladder_compare_isoforms) ||
-      length(input$spladder_compare_isoforms) < 2 || length(input$spladder_compare_isoforms) > 8) {
+      length(input$spladder_compare_isoforms) < 2) {
     cat("DEBUG: Requirements not met - skipping analysis\n")
     return(NULL)
   }
@@ -4500,7 +4495,7 @@ output$spladder_comparative_plot <- renderPlotly({
       p <- plotly::plot_ly() %>%
         plotly::add_annotations(
           x = 0.5, y = 0.5,
-          text = "No comparative data available. Please select 2-8 isoforms and run analysis.",
+          text = "No comparative data available. Please select 2 or more isoforms and run analysis.",
           showarrow = FALSE,
           font = list(size = 16)
         ) %>%
@@ -4897,7 +4892,7 @@ output$spladder_highlighted_isoform_table <- DT::renderDataTable({
 rmats_multi_isoform_data <- reactive({
   req(input$run_rmats_comparative_analysis > 0, input$rmats_protease, input$rmats_miscleavage_type, 
       rmats_merged_data(), input$rmats_compare_isoforms, 
-      length(input$rmats_compare_isoforms) >= 2, length(input$rmats_compare_isoforms) <= 8)
+      length(input$rmats_compare_isoforms) >= 2)
   
   withProgress(message = 'Loading rMATS multi-isoform analysis...', value = 0, {
     protease <- input$rmats_protease
@@ -5061,7 +5056,7 @@ output$rmats_comparative_plot <- renderPlotly({
       p <- plotly::plot_ly() %>%
         plotly::add_annotations(
           x = 0.5, y = 0.5,
-          text = "No comparative data available. Please select 2-8 isoforms and run analysis.",
+          text = "No comparative data available. Please select 2 or more isoforms and run analysis.",
           showarrow = FALSE,
           font = list(size = 16)
         ) %>%
@@ -5878,7 +5873,7 @@ observeEvent(input$load_rmats_gene, {
 # Handler for "Compare Isoforms" button (triggers comparative analysis)
 observeEvent(input$run_rmats_comparative_analysis, {
   req(input$rmats_compare_isoforms, length(input$rmats_compare_isoforms) >= 2, 
-      length(input$rmats_compare_isoforms) <= 8, rmats_merged_data())
+      length(input$rmats_compare_isoforms) >= 2, rmats_merged_data())
   
   withProgress(message = 'Running rMATS comparative analysis...', value = 0, {
     selected_isoforms <- input$rmats_compare_isoforms

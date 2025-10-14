@@ -393,18 +393,35 @@ create_core_data_management_module <- function(input, output, session) {
     # Filter choices based on the search term
     if (!is.null(search_term) && nzchar(search_term)) {
       search_term_lower <- tolower(search_term)
+      search_term_upper <- toupper(search_term)
       
-      # Use fixed = TRUE to treat search as literal string (prevents regex errors)
-      matching_indices <- tryCatch({
+      # Find exact matches (gene symbol matches search term exactly)
+      exact_matches <- which(toupper(gene_symbols) == search_term_upper)
+      
+      # Find starts-with matches (gene symbol starts with search term)
+      starts_with_matches <- tryCatch({
+        grep(paste0("^", search_term_lower), tolower(gene_symbols), fixed = FALSE)
+      }, error = function(e) {
+        integer(0)
+      })
+      # Remove exact matches from starts-with to avoid duplicates
+      starts_with_matches <- setdiff(starts_with_matches, exact_matches)
+      
+      # Find contains matches (search in combined gene symbols and IDs)
+      contains_matches <- tryCatch({
         grep(
           search_term_lower,
           tolower(paste0(gene_symbols, all_gene_ids)),
           fixed = TRUE
         )
       }, error = function(e) {
-        # If search fails, return empty results
         integer(0)
       })
+      # Remove exact and starts-with matches to avoid duplicates
+      contains_matches <- setdiff(contains_matches, c(exact_matches, starts_with_matches))
+      
+      # Combine matches with priority: exact > starts-with > contains
+      matching_indices <- c(exact_matches, starts_with_matches, contains_matches)
       
       # Limit to first 200 matches for performance
       if (length(matching_indices) > 200) {

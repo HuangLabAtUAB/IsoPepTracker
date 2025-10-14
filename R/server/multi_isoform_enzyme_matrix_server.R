@@ -43,8 +43,8 @@ matrix_analysis_data <- reactive({
   miscleavage_type <- input$matrix_miscleavage
   
   # Validate isoform selection
-  if (length(selected_isoforms) < 2 || length(selected_isoforms) > 8) {
-    showNotification("Please select 2-8 isoforms for matrix analysis", type = "warning")
+  if (length(selected_isoforms) < 2) {
+    showNotification("Please select 2 or more isoforms for matrix analysis", type = "warning")
     return(NULL)
   }
   
@@ -563,42 +563,54 @@ create_overlay_plot <- function(data, use_compression = FALSE, intron_scale = NU
 }
 
 
-# Render coverage matrix table
-output$coverage_matrix_table <- DT::renderDataTable({
-  req(matrix_analysis_data())
-  
-  data <- matrix_analysis_data()
-  if (!data$success || is.null(data$coverage_matrix)) {
-    return(data.frame(Message = "No coverage matrix available"))
-  }
-  
-  coverage_df <- data$coverage_matrix
-  coverage_df$Isoform <- rownames(coverage_df)
-  coverage_df <- coverage_df[, c("Isoform", colnames(data$coverage_matrix))]
-  
-  # Add enzyme names to column headers
-  enzyme_names <- unlist(data$enzyme_names[colnames(data$coverage_matrix)])
-  colnames(coverage_df)[-1] <- enzyme_names
-  
-  DT::datatable(
-    coverage_df,
-    options = list(
-      pageLength = 10,
-      scrollX = TRUE,
-      dom = 'Bfrtip',
-      buttons = c('copy', 'csv')
-    ),
-    class = 'cell-border stripe',
-    rownames = FALSE
-  ) %>%
-  DT::formatStyle(
-    columns = enzyme_names,
-    backgroundColor = DT::styleInterval(
-      cuts = c(0, 25, 50, 75),
-      values = c("#ffcccc", "#ffffcc", "#ccffcc", "#ccffff", "#ccccff")
-    )
-  )
-})
+# Render coverage matrix table - DEPRECATED (now integrated into enzyme_peptide_specificity_table)
+# output$coverage_matrix_table <- DT::renderDataTable({
+#   req(matrix_analysis_data())
+#   
+#   data <- matrix_analysis_data()
+#   if (!data$success || is.null(data$coverage_matrix)) {
+#     return(data.frame(Message = "No coverage matrix available"))
+#   }
+#   
+#   coverage_df <- data$coverage_matrix
+#   coverage_df$Isoform <- rownames(coverage_df)
+#   coverage_df <- coverage_df[, c("Isoform", colnames(data$coverage_matrix))]
+#   
+#   # Add enzyme names to column headers
+#   enzyme_names <- unlist(data$enzyme_names[colnames(data$coverage_matrix)])
+#   colnames(coverage_df)[-1] <- enzyme_names
+#   
+#   # Format coverage values and add % sign
+#   dt <- DT::datatable(
+#     coverage_df,
+#     options = list(
+#       pageLength = 10,
+#       scrollX = TRUE,
+#       dom = 'Bfrtip',
+#       buttons = c('copy', 'csv')
+#     ),
+#     class = 'cell-border stripe',
+#     rownames = FALSE
+#   )
+#   
+#   # Format each enzyme column to show % and apply color styling
+#   for (col in enzyme_names) {
+#     if (col %in% colnames(coverage_df)) {
+#       dt <- dt %>%
+#         DT::formatRound(col, digits = 1) %>%
+#         DT::formatString(col, suffix = "%") %>%
+#         DT::formatStyle(
+#           col,
+#           backgroundColor = DT::styleInterval(
+#             cuts = c(0, 25, 50, 75),
+#             values = c("#FFFFFF", "#E3F2FD", "#90CAF9", "#42A5F5", "#1E88E5")
+#           )
+#         )
+#     }
+#   }
+#   
+#   dt
+# })
 
 # Render specificity analysis table
 output$specificity_matrix_table <- DT::renderDataTable({
@@ -629,5 +641,121 @@ output$specificity_matrix_table <- DT::renderDataTable({
       c("#ccffcc", "#ffffcc", "#ffcccc")
     )
   )
+})
+
+# Isoform-specific enzyme performance matrix
+output$enzyme_peptide_specificity_table <- DT::renderDataTable({
+  req(matrix_analysis_data())
+  
+  data <- matrix_analysis_data()
+  if (!data$success || is.null(data$matrix_peptides) || is.null(data$coverage_matrix)) {
+    return(data.frame(Message = "No enzyme analysis available"))
+  }
+  
+  # Get selected enzymes and isoforms
+  selected_enzymes <- data$selected_enzymes
+  selected_isoforms <- data$selected_isoforms
+  enzyme_names <- c(
+    "trp" = "Trypsin",
+    "chymo" = "Chymotrypsin", 
+    "aspn" = "Asp-N",
+    "lysc" = "Lys-C",
+    "lysn" = "Lys-N",
+    "gluc" = "Glu-C"
+  )
+  
+  # Create combined performance matrix with coverage, peptide count, and unique peptides
+  performance_matrix <- data.frame(
+    Isoform = selected_isoforms,
+    stringsAsFactors = FALSE
+  )
+  
+  # Get coverage data
+  coverage_df <- data$coverage_matrix
+  
+  # Add columns for each enzyme: Coverage (%), Peptide Count, Unique Peptide Count
+  for (enzyme in selected_enzymes) {
+    enzyme_name <- enzyme_names[enzyme]
+    enzyme_coverage <- c()
+    enzyme_counts <- c()
+    enzyme_unique_counts <- c()
+    
+    for (isoform in selected_isoforms) {
+      # Get coverage percentage from coverage matrix
+      isoform_idx <- which(rownames(coverage_df) == isoform)
+      enzyme_idx <- which(colnames(coverage_df) == enzyme)
+      coverage_val <- if (length(isoform_idx) > 0 && length(enzyme_idx) > 0) {
+        coverage_df[isoform_idx, enzyme_idx]
+      } else {
+        0
+      }
+      enzyme_coverage <- c(enzyme_coverage, coverage_val)
+      
+      # Count total unique peptides for this isoform-enzyme combination
+      isoform_enzyme_peptides <- data$matrix_peptides[
+        data$matrix_peptides$isoform == isoform & 
+        data$matrix_peptides$enzyme == enzyme, 
+      ]
+      total_peptides <- length(unique(isoform_enzyme_peptides$peptide))
+      enzyme_counts <- c(enzyme_counts, total_peptides)
+      
+      # Count isoform-specific peptides for this enzyme
+      unique_peptides <- unique(isoform_enzyme_peptides$peptide)
+      unique_count <- 0
+      
+      for (peptide in unique_peptides) {
+        # Check if this peptide appears in other isoforms for this same enzyme
+        other_isoforms_same_enzyme <- unique(data$matrix_peptides$isoform[
+          data$matrix_peptides$peptide == peptide & 
+          data$matrix_peptides$enzyme == enzyme
+        ])
+        if (length(other_isoforms_same_enzyme) == 1 && other_isoforms_same_enzyme[1] == isoform) {
+          unique_count <- unique_count + 1
+        }
+      }
+      enzyme_unique_counts <- c(enzyme_unique_counts, unique_count)
+    }
+    
+    # Add three columns for this enzyme: Coverage (%), Peptide Count, Unique Peptide Count
+    performance_matrix[[paste0(enzyme_name, " Coverage (%)")]] <- enzyme_coverage
+    performance_matrix[[paste0(enzyme_name, " Peptide Count")]] <- enzyme_counts
+    performance_matrix[[paste0(enzyme_name, " Unique Peptide Count")]] <- enzyme_unique_counts
+  }
+  
+  
+  if (nrow(performance_matrix) == 0) {
+    return(data.frame(Message = "No performance data available"))
+  }
+  
+  # Create the datatable without color highlighting
+  dt <- DT::datatable(
+    performance_matrix,
+    options = list(
+      pageLength = 15,
+      scrollX = TRUE,
+      dom = 'Bfrtip',
+      buttons = c('copy', 'csv'),
+      columnDefs = list(
+        list(className = 'dt-center', targets = '_all')
+      )
+    ),
+    class = 'cell-border stripe',
+    rownames = FALSE
+  )
+  
+  # Format columns for each enzyme (only formatting, no colors)
+  for (enzyme in selected_enzymes) {
+    enzyme_name <- enzyme_names[enzyme]
+    
+    # Coverage column - format with % only (no color)
+    coverage_col <- paste0(enzyme_name, " Coverage (%)")
+    if (coverage_col %in% colnames(performance_matrix)) {
+      dt <- dt %>% 
+        DT::formatRound(coverage_col, digits = 1) %>%
+        DT::formatString(coverage_col, suffix = "%")
+    }
+  }
+  
+  return(dt)
 })
 

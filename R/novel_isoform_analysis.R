@@ -82,10 +82,10 @@ run_novel_isoform_genomic_direct <- function(input_fasta_file,
     
     # STEP 1: TransDecoder Analysis (exactly like user's working version)
     cat("STEP 1: TransDecoder Analysis...\n")
-    result1 <- system2("TransDecoder.LongOrfs", 
+    result1 <- system2("/Users/Mahmuda/opt/anaconda3/envs/module3_tools/bin/TransDecoder.LongOrfs", 
                       args = c("-t", "novel_transcript_nt.fa", "-m", min_protein_length), 
                       wait = TRUE)
-    result2 <- system2("TransDecoder.Predict", 
+    result2 <- system2("/Users/Mahmuda/opt/anaconda3/envs/module3_tools/bin/TransDecoder.Predict", 
                       args = c("-t", "novel_transcript_nt.fa", "--no_refine_starts"),
                       wait = TRUE)
     cat("TransDecoder analysis completed\n")
@@ -96,13 +96,13 @@ run_novel_isoform_genomic_direct <- function(input_fasta_file,
     
     # STEP 2: Genome Alignment (exactly like user's working version)
     cat("STEP 2: Genome Alignment...\n")
-    system2("minimap2", 
-            args = c("-ax", "splice", "-t", "1","-I", "512M","--secondary=no","../../reference/GRCh38.mmi",  "novel_transcript_nt.fa"),
+    system2("/Users/Mahmuda/opt/anaconda3/envs/module3_tools/bin/minimap2", 
+            args = c("-ax", "splice", "../../reference/GRCh38.mmi", "novel_transcript_nt.fa"),
             stdout = "novel_transcript_nt_aligned.sam", wait = TRUE)
-    system2("samtools", 
-            args = c("view", "-bT","../../reference/GRCh38.fa" , "novel_transcript_nt_aligned.sam"),
+    system2("/Users/Mahmuda/opt/anaconda3/envs/module3_tools/bin/samtools", 
+            args = c("view", "-Sb", "novel_transcript_nt_aligned.sam"),
             stdout = "novel_transcript_nt_aligned.bam", wait = TRUE)
-    system2("samtools", 
+    system2("/Users/Mahmuda/opt/anaconda3/envs/module3_tools/bin/samtools", 
             args = c("sort", "novel_transcript_nt_aligned.bam", "-o", "novel_transcript_nt_aligned_sorted.bam"),
             wait = TRUE)
     cat("Genome alignment completed\n")
@@ -113,7 +113,7 @@ run_novel_isoform_genomic_direct <- function(input_fasta_file,
     
     # STEP 3: StringTie Transcript Reconstruction (exactly like user's working version)
     cat("STEP 3: StringTie Transcript Reconstruction...\n")
-    system2("stringtie", 
+    system2("/Users/Mahmuda/opt/anaconda3/envs/module3_tools/bin/stringtie", 
             args = c("novel_transcript_nt_aligned_sorted.bam", "-o", "novel_transcript_nt_transcripts.gtf", "-l", "Novel_sequence_1"),
             wait = TRUE)
     cat("Transcript reconstruction completed\n")
@@ -124,7 +124,7 @@ run_novel_isoform_genomic_direct <- function(input_fasta_file,
     
     # STEP 4: Convert StringTie GTF to Target= GFF3 (exactly like user's working version)
     cat("STEP 4: Convert StringTie GTF to Target= GFF3...\n")
-    system2("/usr/lib/transdecoder/util/gtf_to_alignment_gff3.pl",
+    system2("/Users/Mahmuda/opt/anaconda3/envs/module3_tools/opt/transdecoder/util/gtf_to_alignment_gff3.pl",
             args = "novel_transcript_nt_transcripts.gtf",
             stdout = "novel_transcript_nt_alignment.gff3", wait = TRUE)
     
@@ -142,7 +142,7 @@ run_novel_isoform_genomic_direct <- function(input_fasta_file,
     
     # STEP 5: Map ORFs to Genome (exactly like user's working version)
     cat("STEP 5: Map ORFs to Genome...\n")
-    result5 <- system2("/usr/lib/transdecoder/util/cdna_alignment_orf_to_genome_orf.pl",
+    result5 <- system2("/Users/Mahmuda/opt/anaconda3/envs/module3_tools/opt/transdecoder/util/cdna_alignment_orf_to_genome_orf.pl",
             args = c("novel_transcript_nt.fa.transdecoder.gff3", "novel_transcript_nt_alignment.gff3", "novel_transcript_nt.fa"),
             stdout = "novel_transcript_nt.transdecoder.genome.gff3", wait = TRUE)
     
@@ -160,7 +160,7 @@ run_novel_isoform_genomic_direct <- function(input_fasta_file,
   
         # STEP 6: Convert to GTF (exactly like user's working version)
     cat("STEP 6: Convert to GTF...\n")
-    system2("gffread", 
+    system2("/Users/Mahmuda/opt/anaconda3/envs/module3_tools/bin/gffread", 
             args = c("novel_transcript_nt.transdecoder.genome.gff3", "-T", "-o", "novel_transcript_nt.transdecoder.genome.gtf"),
             wait = TRUE)
     cat("Final GTF created\n")
@@ -171,7 +171,7 @@ run_novel_isoform_genomic_direct <- function(input_fasta_file,
     
     # STEP 7-8: Run novel_peptide_generator.R (exactly like user's working version)
     cat("STEP 7-8: Running novel_peptide_generator.R...\n")
-    system2("Rscript", args = "../../novel_peptide_generator.R", wait = TRUE)
+    system2("/usr/local/bin/Rscript", args = "../../novel_peptide_generator.R", wait = TRUE)
     
     # Copy results to expected locations
     file.copy("novel_transcript_nt.transdecoder.genome.gtf", "results/novel_final.gtf", overwrite = TRUE)

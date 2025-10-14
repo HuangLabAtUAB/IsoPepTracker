@@ -10,6 +10,70 @@ library("plotly")
 # Enhanced styling with card-based navigation
 css_styles <- tags$head(
   tags$style(HTML("
+    /* Global font size increases */
+    body {
+      font-size: 30px !important;
+    }
+    
+    /* Headers - increased sizes */
+    h1 { font-size: 3.84rem !important; }
+    h2 { font-size: 3.36rem !important; }
+    h3 { font-size: 2.88rem !important; }
+    h4 { font-size: 2.4rem !important; }
+    h5 { font-size: 2.04rem !important; }
+    
+    /* Input and select elements */
+    .form-control, .selectize-input {
+      font-size: 2.2rem !important;
+    }
+    
+    /* Buttons */
+    .btn {
+      font-size: 2.2rem !important;
+    }
+    
+    /* DataTables */
+    .dataTables_wrapper {
+      font-size: 2rem !important;
+    }
+    
+    /* Help text */
+    .help-block, .helpText {
+      font-size: 1.8rem !important;
+    }
+    
+    /* Tab content areas - moderate font sizes */
+    .analysis-container .box-body,
+    .analysis-container .form-control,
+    .analysis-container .selectize-input {
+      font-size: 1.65rem !important;
+    }
+    
+    .analysis-container .btn {
+      font-size: 1.65rem !important;
+    }
+    
+    .analysis-container .dataTables_wrapper {
+      font-size: 1.5rem !important;
+    }
+    
+    .analysis-container h4 {
+      font-size: 1.8rem !important;
+    }
+    
+    .analysis-container h5 {
+      font-size: 1.44rem !important;
+    }
+    
+    .analysis-container p {
+      font-size: 1.5rem !important;
+    }
+    
+    .analysis-container .help-block,
+    .analysis-container .helpText {
+      font-size: 1.35rem !important;
+    }
+    
     /* Wrapper and container fixes */
     .content-wrapper, .right-side {
       overflow-x: hidden !important;
@@ -20,6 +84,7 @@ css_styles <- tags$head(
     .box-body {
       overflow-x: auto !important;
       padding: 10px !important;
+      font-size: 2rem !important;
     }
     
     /* Plot container responsiveness */
@@ -81,7 +146,7 @@ css_styles <- tags$head(
     }
     
     .view-title {
-      font-size: 1.8rem;
+      font-size: 4.35rem;
       font-weight: 300;
       margin: 0;
       text-shadow: 0 1px 3px rgba(0,0,0,0.3);
@@ -91,9 +156,9 @@ css_styles <- tags$head(
       background: rgba(255, 255, 255, 0.2) !important;
       border: 1px solid rgba(255, 255, 255, 0.3) !important;
       color: white !important;
-      padding: 8px 16px !important;
+      padding: 15px 30px !important;
       border-radius: 20px !important;
-      font-size: 0.9rem !important;
+      font-size: 2.2rem !important;
       transition: all 0.3s ease !important;
     }
     
@@ -108,6 +173,8 @@ css_styles <- tags$head(
       background: #ffffff !important;
       color: #666 !important;
       border: 1px solid #ddd !important;
+      font-size: 2.25rem !important;
+      font-weight: 500 !important;
     }
     
     .tab-btn:hover {
@@ -121,18 +188,18 @@ css_styles <- tags$head(
       border-color: #667eea !important;
     }
     
-    /* Mobile responsiveness for card grid */
+    /* Mobile adjustments for height responsiveness */
     @media (max-width: 768px) {
       .card-grid {
-        grid-template-columns: 1fr !important;
-        grid-template-rows: auto !important;
-        max-width: 400px !important;
-        gap: 20px !important;
+        grid-auto-rows: minmax(20vh, 35vh) !important;
+        gap: 1rem !important;
+        padding: 0 0.5rem !important;
       }
-      
-      .card-grid > div {
-        width: 100% !important;
-        max-width: 350px !important;
+    }
+    
+    @media (max-width: 480px) {
+      .card-grid {
+        grid-auto-rows: minmax(18vh, 30vh) !important;
       }
     }
   ")),
@@ -238,30 +305,29 @@ ui <- fluidPage(
         # Title and Subtitle
         h1("Proteomics Analysis Suite", 
            style = "color: white; 
-                    font-size: 3.5rem; 
+                    font-size: 7.2rem; 
                     font-weight: 300; 
                     margin-bottom: 20px; 
                     text-shadow: 0 2px 4px rgba(0,0,0,0.3);"),
         
-        p("Advanced tools for analyzing protein isoforms, discovering novel transcripts, and performing comprehensive peptide sequence analysis with state-of-the-art algorithms.",
+        p("Visualization tools for analyzing protein isoforms, discovering novel transcripts, and performing comprehensive peptide sequence analysis.",
           style = "color: rgba(255, 255, 255, 0.9); 
-                   font-size: 1.3rem; 
+                   font-size: 2.52rem; 
                    font-weight: 300; 
-                   max-width: 800px; 
+                   max-width: 900px; 
                    margin: 0 auto 60px auto; 
                    line-height: 1.6;"),
         
-        # Feature Cards Grid - 2x2 layout
+        # Feature Cards Grid - TRULY Dynamic (Width AND Height)
         div(
           class = "card-grid",
           style = "display: grid; 
-                   grid-template-columns: repeat(2, 1fr); 
-                   grid-template-rows: repeat(2, 1fr);
-                   gap: 25px; 
-                   max-width: 900px; 
+                   grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); 
+                   grid-auto-rows: minmax(25vh, 40vh);
+                   gap: 1.5rem; 
+                   max-width: 100%; 
                    margin: 0 auto;
-                   justify-items: center;
-                   align-items: stretch;",
+                   padding: 0 1rem;",
           
           # Card 1: Canonical Isoform Analysis
           div(
@@ -270,16 +336,18 @@ ui <- fluidPage(
                      backdrop-filter: blur(10px); 
                      border: 1px solid rgba(255, 255, 255, 0.2); 
                      border-radius: 20px; 
-                     padding: 40px; 
+                     padding: 2rem; 
                      cursor: pointer; 
                      transition: all 0.3s ease; 
                      color: white; 
                      text-align: center;
-                     width: 380px;
-                     height: 420px;
+                     width: 100%;
+                     height: 100%;
                      display: flex;
                      flex-direction: column;
-                     justify-content: center;",
+                     justify-content: center;
+                     align-items: center;
+                     overflow: hidden;",
             onmouseover = "this.style.transform='translateY(-8px)'; 
                            this.style.background='rgba(255, 255, 255, 0.25)'; 
                            this.style.borderColor='rgba(255, 255, 255, 0.4)'; 
@@ -290,22 +358,15 @@ ui <- fluidPage(
                           this.style.boxShadow='none';",
             
             div(
-              style = "background: rgba(102, 126, 234, 0.3); 
-                       border-radius: 50%; 
-                       width: 80px; 
-                       height: 120px; 
-                       display: flex; 
-                       align-items: center; 
-                       justify-content: center; 
-                       margin: 0 auto 20px auto;",
-              icon("dna", style = "font-size: 28px;")
+              style = "display: flex; flex-direction: column; align-items: center; margin-bottom: 1rem;",
+              icon("dna", style = "font-size: 53px; margin-bottom: 0.5rem; display: block;"),
+              h3("Canonical Isoform Analysis", 
+                 style = "font-size: 2.88rem; 
+                          margin-bottom: 0; 
+                          font-weight: 500;")
             ),
-            h3("Canonical Isoform Analysis", 
-               style = "font-size: 1.4rem; 
-                        margin-bottom: 15px; 
-                        font-weight: 500;"),
             p("Analyze known gene structures and alternative splicing patterns with comprehensive protease digestion predictions.",
-              style = "font-size: 1rem; 
+              style = "font-size: 1.92rem; 
                        line-height: 1.6; 
                        opacity: 0.9; 
                        margin: 0;")
@@ -318,16 +379,18 @@ ui <- fluidPage(
                      backdrop-filter: blur(10px); 
                      border: 1px solid rgba(255, 255, 255, 0.2); 
                      border-radius: 20px; 
-                     padding: 40px; 
+                     padding: 2rem; 
                      cursor: pointer; 
                      transition: all 0.3s ease; 
                      color: white; 
                      text-align: center;
-                     width: 380px;
-                     height: 420px;
+                     width: 100%;
+                     height: 100%;
                      display: flex;
                      flex-direction: column;
-                     justify-content: center;",
+                     justify-content: center;
+                     align-items: center;
+                     overflow: hidden;",
             onmouseover = "this.style.transform='translateY(-8px)'; 
                            this.style.background='rgba(255, 255, 255, 0.25)'; 
                            this.style.borderColor='rgba(255, 255, 255, 0.4)'; 
@@ -338,22 +401,15 @@ ui <- fluidPage(
                           this.style.boxShadow='none';",
             
             div(
-              style = "background: rgba(118, 75, 162, 0.3); 
-                       border-radius: 50%; 
-                       width: 80px; 
-                       height: 120px; 
-                       display: flex; 
-                       align-items: center; 
-                       justify-content: center; 
-                       margin: 0 auto 20px auto;",
-              icon("rocket", style = "font-size: 28px;")
+              style = "display: flex; flex-direction: column; align-items: center; margin-bottom: 1rem;",
+              icon("rocket", style = "font-size: 53px; margin-bottom: 0.5rem; display: block;"),
+              h3("Novel Isoform Discovery", 
+                 style = "font-size: 2.88rem; 
+                          margin-bottom: 0; 
+                          font-weight: 500;")
             ),
-            h3("Novel Isoform Discovery", 
-               style = "font-size: 1.4rem; 
-                        margin-bottom: 15px; 
-                        font-weight: 500;"),
             p("Upload transcript sequences to identify novel isoforms and compare against known proteomes with advanced algorithms.",
-              style = "font-size: 1rem; 
+              style = "font-size: 1.92rem; 
                        line-height: 1.6; 
                        opacity: 0.9; 
                        margin: 0;")
@@ -366,16 +422,18 @@ ui <- fluidPage(
                      backdrop-filter: blur(10px); 
                      border: 1px solid rgba(255, 255, 255, 0.2); 
                      border-radius: 20px; 
-                     padding: 40px; 
+                     padding: 2rem; 
                      cursor: pointer; 
                      transition: all 0.3s ease; 
                      color: white; 
                      text-align: center;
-                     width: 380px;
-                     height: 420px;
+                     width: 100%;
+                     height: 100%;
                      display: flex;
                      flex-direction: column;
-                     justify-content: center;",
+                     justify-content: center;
+                     align-items: center;
+                     overflow: hidden;",
             onmouseover = "this.style.transform='translateY(-8px)'; 
                            this.style.background='rgba(255, 255, 255, 0.25)'; 
                            this.style.borderColor='rgba(255, 255, 255, 0.4)'; 
@@ -386,22 +444,15 @@ ui <- fluidPage(
                           this.style.boxShadow='none';",
             
             div(
-              style = "background: rgba(102, 126, 234, 0.3); 
-                       border-radius: 50%; 
-                       width: 80px; 
-                       height: 120px; 
-                       display: flex; 
-                       align-items: center; 
-                       justify-content: center; 
-                       margin: 0 auto 20px auto;",
-              icon("search", style = "font-size: 28px;")
+              style = "display: flex; flex-direction: column; align-items: center; margin-bottom: 1rem;",
+              icon("search", style = "font-size: 53px; margin-bottom: 0.5rem; display: block;"),
+              h3("Peptide Sequence Search", 
+                 style = "font-size: 2.88rem; 
+                          margin-bottom: 0; 
+                          font-weight: 500;")
             ),
-            h3("Peptide Sequence Search", 
-               style = "font-size: 1.4rem; 
-                        margin-bottom: 15px; 
-                        font-weight: 500;"),
             p("Perform BLASTP searches against comprehensive protein databases with statistical analysis and advanced filtering.",
-              style = "font-size: 1rem; 
+              style = "font-size: 1.92rem; 
                        line-height: 1.6; 
                        opacity: 0.9; 
                        margin: 0;")
@@ -414,16 +465,18 @@ ui <- fluidPage(
                      backdrop-filter: blur(10px); 
                      border: 1px solid rgba(255, 255, 255, 0.2); 
                      border-radius: 20px; 
-                     padding: 40px; 
+                     padding: 2rem; 
                      cursor: pointer; 
                      transition: all 0.3s ease; 
                      color: white; 
                      text-align: center;
-                     width: 380px;
-                     height: 420px;
+                     width: 100%;
+                     height: 100%;
                      display: flex;
                      flex-direction: column;
-                     justify-content: center;",
+                     justify-content: center;
+                     align-items: center;
+                     overflow: hidden;",
             onmouseover = "this.style.transform='translateY(-8px)'; 
                            this.style.background='rgba(255, 255, 255, 0.25)'; 
                            this.style.borderColor='rgba(255, 255, 255, 0.4)'; 
@@ -434,22 +487,15 @@ ui <- fluidPage(
                           this.style.boxShadow='none';",
             
             div(
-              style = "background: rgba(118, 75, 162, 0.3); 
-                       border-radius: 50%; 
-                       width: 80px; 
-                       height: 120px; 
-                       display: flex; 
-                       align-items: center; 
-                       justify-content: center; 
-                       margin: 0 auto 20px auto;",
-              icon("project-diagram", style = "font-size: 28px;")
+              style = "display: flex; flex-direction: column; align-items: center; margin-bottom: 1rem;",
+              icon("project-diagram", style = "font-size: 53px; margin-bottom: 0.5rem; display: block;"),
+              h3("Alternative Splicing Analysis", 
+                 style = "font-size: 2.88rem; 
+                          margin-bottom: 0; 
+                          font-weight: 500;")
             ),
-            h3("Alternative Splicing Analysis", 
-               style = "font-size: 1.4rem; 
-                        margin-bottom: 15px; 
-                        font-weight: 500;"),
             p("Comprehensive analysis of alternative splicing events using rMATS with functional consequence prediction.",
-              style = "font-size: 1rem; 
+              style = "font-size: 1.92rem; 
                        line-height: 1.6; 
                        opacity: 0.9; 
                        margin: 0;")
@@ -486,7 +532,7 @@ ui <- fluidPage(
           collapsible = TRUE,
           fluidRow(
             column(3,
-              textInput("gene_search", "Search Gene:", value = "EGFR", placeholder = "Type gene symbol or ID...")
+              textInput("gene_search", "Search Gene:", value = "", placeholder = "e.g., TP53, BRCA1, NPM1...")
             ),
             column(3,
               selectizeInput("gene", "Select Gene:", choices = NULL, options = list(
@@ -541,7 +587,7 @@ ui <- fluidPage(
             onclick = "Shiny.setInputValue('canonical_current_tab', 'events');",
             style = "flex: 1; text-align: center; padding: 12px; cursor: pointer; border-radius: 4px; font-weight: 500; transition: all 0.3s ease;",
             class = "tab-btn tab-events",
-            "Events-centric view"
+            "Event-centric view"
           ),
           div(
             onclick = "Shiny.setInputValue('canonical_current_tab', 'isoforms');",
@@ -584,7 +630,7 @@ ui <- fluidPage(
         )
       ),
       
-      # Tab 2: Events-centric view
+      # Tab 2: Event-centric view
       conditionalPanel(
         condition = "input.canonical_current_tab == 'events'",
         fluidRow(
@@ -814,16 +860,15 @@ ui <- fluidPage(
               div(
                 style = "background-color: #f0f8ff; padding: 15px; border-left: 4px solid #3c8dbc; margin-bottom: 15px;",
                 h4("Compare Multiple Isoforms", style = "margin-top: 0; color: #3c8dbc;"),
-                p("Select 2 to 8 isoforms to visualize their structures side by side and analyze shared, unique, and universal peptides. Compare multiple isoforms by analyzing 2-8 transcript variants with side-by-side visualization to see structural differences, analyze shared peptides to identify universal, shared, and unique peptides, and get detailed overlap statistics with comparative summary.", style = "margin-bottom: 10px;")
+                p("Select 2 or more isoforms to visualize their structures side by side and analyze shared, unique, and universal peptides. Compare multiple isoforms by analyzing transcript variants with side-by-side visualization to see structural differences, analyze shared peptides to identify universal, shared, and unique peptides, and get detailed overlap statistics with comparative summary.", style = "margin-bottom: 10px;")
               ),
               fluidRow(
                 column(8,
                   selectizeInput("compare_isoforms", 
-                               "Select Isoforms to Compare (2-8):",
+                               "Select Isoforms to Compare (2+):",
                                choices = NULL,
                                multiple = TRUE,
                                options = list(
-                                 maxItems = 8,
                                  placeholder = "Select at least 2 isoforms to compare..."
                                ),
                                width = "100%")
@@ -973,19 +1018,18 @@ ui <- fluidPage(
                 style = "background-color: #fff3cd; padding: 15px; border-left: 4px solid #ffc107; margin-bottom: 15px;",
                 h4("Matrix Analysis: Multiple Isoforms × Multiple Enzymes", style = "margin-top: 0; color: #856404;"),
                 p("Combine the power of multi-isoform and multi-enzyme analysis! Generate comprehensive peptide coverage matrices.", style = "margin-bottom: 10px;"),
-                p("Select 2-8 isoforms AND 2-6 enzymes for comprehensive combinations, see all isoform×enzyme combinations with matrix visualization, use advanced filtering for universal, shared, and unique peptides, and get comprehensive analysis by dimension with coverage statistics.", style = "margin-bottom: 10px;")
+                p("Select 2 or more isoforms AND 2-6 enzymes for comprehensive combinations, see all isoform×enzyme combinations with matrix visualization, use advanced filtering for universal, shared, and unique peptides, and get comprehensive analysis by dimension with coverage statistics.", style = "margin-bottom: 10px;")
               ),
               
               # Control Panel
               fluidRow(
                 column(6,
                   selectizeInput("matrix_isoforms", 
-                                "Select Isoforms for Matrix Analysis (2-8):",
+                                "Select Isoforms for Matrix Analysis (2+):",
                                 choices = NULL,
                                 multiple = TRUE,
                                 options = list(
-                                  maxItems = 8,
-                                  placeholder = "Select 2-8 isoforms for matrix analysis..."
+                                  placeholder = "Select 2+ isoforms for matrix analysis..."
                                 ),
                                 width = "100%")
                 ),
@@ -1081,16 +1125,20 @@ ui <- fluidPage(
                 conditionalPanel(
                   condition = "input.matrix_show_statistics",
                   fluidRow(
-                    column(6,
+                    column(12,
                       box(
-                        title = "Coverage Matrix",
+                        title = "Enzyme Statistics",
                         status = "warning",
                         solidHeader = TRUE,
                         width = NULL,
-                        DT::dataTableOutput("coverage_matrix_table")
+                        p("Comprehensive enzyme performance analysis showing coverage percentages, total peptide counts, and unique peptide counts for each isoform-enzyme combination.", 
+                          style = "margin-bottom: 15px; color: #856404;"),
+                        DT::dataTableOutput("enzyme_peptide_specificity_table")
                       )
-                    ),
-                    column(6,
+                    )
+                  ),
+                  fluidRow(
+                    column(12,
                       box(
                         title = "Peptide Specificity Analysis",
                         status = "warning",
@@ -1301,7 +1349,7 @@ ui <- fluidPage(
                                "Select Isoforms to Compare:",
                                choices = NULL,
                                multiple = TRUE,
-                               options = list(maxItems = 8, placeholder = "Select 2-8 isoforms..."),
+                               options = list(placeholder = "Select 2+ isoforms..."),
                                width = "100%")
                 ),
                 column(4,
@@ -1768,7 +1816,7 @@ ui <- fluidPage(
                                "Select Isoforms to Compare:",
                                choices = NULL,
                                multiple = TRUE,
-                               options = list(maxItems = 8, placeholder = "Select 2-8 isoforms (include rMATS variants)..."),
+                               options = list(placeholder = "Select 2+ isoforms (include rMATS variants)..."),
                                width = "100%")
                 ),
                 column(4,
