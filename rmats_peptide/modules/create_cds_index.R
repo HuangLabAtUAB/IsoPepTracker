@@ -138,7 +138,15 @@ search_cds_index <- function(cds_index, search_chromosome, search_start, search_
   
   # Filter by gene if specified (much faster)
   if (!is.null(search_gene_id)) {
-    search_data <- cds_index[gene_id == search_gene_id]  # Use data.table syntax
+    # Strip version numbers for matching (e.g., ENSG00000101605.14 -> ENSG00000101605)
+    search_gene_base <- sub("\\.\\d+$", "", search_gene_id)
+    
+    # Try exact match first, then version-stripped match
+    search_data <- cds_index[gene_id == search_gene_id]
+    if (nrow(search_data) == 0) {
+      # Strip versions from CDS index gene IDs for comparison
+      search_data <- cds_index[sub("\\.\\d+$", "", gene_id) == search_gene_base]
+    }
   } else {
     search_data <- cds_index
   }

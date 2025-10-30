@@ -2,6 +2,70 @@
 # NOVEL ISOFORM DISCOVERY SERVER LOGIC
 #===============================================================================
 
+# FASTA validation function
+validate_fasta_text <- function(text_input) {
+  if (is.null(text_input) || trimws(text_input) == "") {
+    return(list(valid = FALSE, message = "Text input is empty"))
+  }
+  
+  lines <- strsplit(text_input, "\n")[[1]]
+  lines <- lines[nzchar(trimws(lines))]  # Remove empty lines
+  
+  if (length(lines) == 0) {
+    return(list(valid = FALSE, message = "No valid lines found in input"))
+  }
+  
+  # Check for FASTA headers
+  header_lines <- grep("^>", lines)
+  if (length(header_lines) == 0) {
+    return(list(valid = FALSE, message = "No FASTA headers found. Headers must start with '>'"))
+  }
+  
+  # Check that first line is a header
+  if (!grepl("^>", lines[1])) {
+    return(list(valid = FALSE, message = "First line must be a FASTA header starting with '>'"))
+  }
+  
+  # Validate sequence content
+  sequence_lines <- lines[-header_lines]
+  if (length(sequence_lines) == 0) {
+    return(list(valid = FALSE, message = "No sequence data found after headers"))
+  }
+  
+  # Check for valid nucleotide characters
+  all_sequence <- paste(sequence_lines, collapse = "")
+  invalid_chars <- gsub("[ATGCNRYSWKMBDHV-]", "", toupper(all_sequence))
+  if (nchar(invalid_chars) > 0) {
+    return(list(valid = FALSE, message = paste("Invalid characters found in sequences:", substr(invalid_chars, 1, 10))))
+  }
+  
+  # Check minimum sequence length
+  sequences <- c()
+  current_seq <- ""
+  for (line in lines) {
+    if (grepl("^>", line)) {
+      if (nchar(current_seq) > 0) {
+        sequences <- c(sequences, current_seq)
+      }
+      current_seq <- ""
+    } else {
+      current_seq <- paste0(current_seq, line)
+    }
+  }
+  if (nchar(current_seq) > 0) {
+    sequences <- c(sequences, current_seq)
+  }
+  
+  # Check for minimum length sequences
+  min_length <- 50  # Minimum reasonable sequence length
+  short_sequences <- sum(nchar(sequences) < min_length)
+  if (short_sequences > 0) {
+    return(list(valid = FALSE, message = paste("Found", short_sequences, "sequences shorter than", min_length, "nucleotides")))
+  }
+  
+  return(list(valid = TRUE, message = paste("Valid FASTA format with", length(sequences), "sequences")))
+}
+
 # Reactive values for novel isoform analysis
 novel_pipeline_results <- reactiveVal(NULL)
 novel_isoform_data <- reactiveVal(NULL)
@@ -12,19 +76,47 @@ novel_merged_data <- reactiveVal(NULL)
 
 # Run novel isoform pipeline when button is clicked
 observeEvent(input$run_novel_pipeline, {
-  req(input$novel_fasta_file)
-  
-  # Get uploaded file info
+  # Get inputs from both file upload and text area
   file_info <- input$novel_fasta_file
-  if (is.null(file_info)) {
-    showNotification("Please select a FASTA file to upload.", type = "warning")
+  text_input <- input$novel_fasta_text
+  
+  # Clean text input
+  if (!is.null(text_input)) {
+    text_input <- trimws(text_input)
+  }
+  
+  # Validate at least one input is provided
+  if ((is.null(file_info) || is.null(file_info$datapath)) && 
+      (is.null(text_input) || text_input == "")) {
+    showNotification("Please provide FASTA sequences via file upload or text input.", type = "warning")
     return()
   }
   
-  # Validate file extension
-  if (!grepl("\\.(fa|fasta|fas)$", file_info$name, ignore.case = TRUE)) {
-    showNotification("Please upload a valid FASTA file (.fa, .fasta, or .fas)", type = "error")
-    return()
+  # Determine input source and prepare file path
+  input_path <- NULL
+  temp_file_created <- FALSE
+  
+  if (!is.null(file_info) && !is.null(file_info$datapath)) {
+    # Use uploaded file
+    # Validate file extension
+    if (!grepl("\\.(fa|fasta|fas|txt)$", file_info$name, ignore.case = TRUE)) {
+      showNotification("Please upload a valid FASTA file (.fa, .fasta, .fas, or .txt)", type = "error")
+      return()
+    }
+    input_path <- file_info$datapath
+  } else if (!is.null(text_input) && text_input != "") {
+    # Enhanced FASTA format validation for text input
+    fasta_validation <- validate_fasta_text(text_input)
+    if (!fasta_validation$valid) {
+      showNotification(fasta_validation$message, type = "error")
+      return()
+    }
+    
+    # Create temporary file from text input
+    temp_file <- tempfile(fileext = ".fasta")
+    writeLines(strsplit(text_input, "\n")[[1]], temp_file)
+    input_path <- temp_file
+    temp_file_created <- TRUE
   }
   
   withProgress(message = 'Running Novel Isoform Discovery Pipeline...', value = 0, {
@@ -77,6 +169,15 @@ observeEvent(input$run_novel_pipeline, {
     }, error = function(e) {
       showNotification(paste("Pipeline execution failed:", e$message), type = "error")
       novel_pipeline_results(list(success = FALSE, error = e$message))
+    }, finally = {
+      # Clean up temporary file if created
+      if (temp_file_created && !is.null(input_path) && file.exists(input_path)) {
+        tryCatch({
+          file.remove(input_path)
+        }, error = function(e) {
+          # Silently handle cleanup errors
+        })
+      }
     })
   })
 })

@@ -54,6 +54,9 @@
   observeEvent(input$run_peptide_search, {
     req(input$peptide_search_query)
     
+    # Clear any existing results to force fresh search with updated parameters
+    peptide_search_results(NULL)
+    
     # Validate BLAST database
     blast_db_check <- validate_blast_database()
     if (!blast_db_check$valid) {
@@ -74,8 +77,8 @@
     
     withProgress(message = 'Searching peptides with BLASTP...', {
       tryCatch({
-        # Get BLAST parameters from input
-        evalue_threshold <- if (!is.null(input$peptide_search_evalue)) input$peptide_search_evalue else 10
+        # Get BLAST parameters from input (higher default E-value for short peptide sensitivity)
+        evalue_threshold <- if (!is.null(input$peptide_search_evalue)) input$peptide_search_evalue else 20000
         identity_threshold <- if (!is.null(input$peptide_search_identity)) input$peptide_search_identity else 70
         max_targets <- if (!is.null(input$peptide_search_max_targets)) input$peptide_search_max_targets else 500
         
@@ -103,6 +106,10 @@
           incProgress(0.05, detail = "Cross-referencing with peptide databases...")
           enhanced_results <- cross_reference_blast_with_peptide_databases(results, peptide_query)
           
+          # Debug: Check what columns we have before storing results
+          cat("DEBUG: Columns in enhanced_results before storing:", paste(names(enhanced_results), collapse = ", "), "\n")
+          cat("DEBUG: Query coverage present before storing:", "query_coverage" %in% names(enhanced_results), "\n")
+          
           # Add default values for compatibility with navigation
           enhanced_results$protease_used <- "blastp"
           enhanced_results$miscleavage_type_used <- "none"
@@ -113,6 +120,11 @@
           
           # Store enhanced results
           peptide_search_results(enhanced_results)
+          
+          # Debug: Check what was actually stored
+          stored_results <- peptide_search_results()
+          cat("DEBUG: Columns in stored results:", paste(names(stored_results), collapse = ", "), "\n")
+          cat("DEBUG: Query coverage present in stored results:", "query_coverage" %in% names(stored_results), "\n")
           
           incProgress(0.1, detail = "Complete")
           
@@ -201,6 +213,14 @@
     if ("identity_percent" %in% names(results)) {
       # BLAST results format with enzyme availability
       base_cols <- c("peptide", "geneID", "geneSymbol", "txID", "identity_percent", "evalue", "bit_score")
+      base_colnames <- c("Query Peptide", "Gene ID", "Gene Symbol", "Transcript ID", 
+                        "Identity %", "E-value", "Bit Score")
+      
+      # Add exact match column if available
+      if ("exact_match_found" %in% names(results)) {
+        base_cols <- c(base_cols, "exact_match_found")
+        base_colnames <- c(base_colnames, "Exact Match")
+      }
       
       # Add all 12 enzyme availability columns if they exist
       enzyme_cols <- c("trp_no_miss", "trp_upto2miss", "chymo_no_miss", "chymo_upto2miss", 
@@ -210,9 +230,6 @@
       
       display_cols <- c(base_cols, available_enzyme_cols)
       display_df <- results[, display_cols]
-      
-      base_colnames <- c("Query Peptide", "Gene ID", "Gene Symbol", "Transcript ID", 
-                        "Identity %", "E-value", "Bit Score")
       
       # Add enzyme column names
       enzyme_colnames <- c()
@@ -231,8 +248,8 @@
       
       colnames(display_df) <- c(base_colnames, enzyme_colnames)
       
-      # Sort by bit score (descending) and E-value (ascending)
-      display_df <- display_df[order(-display_df$`Bit Score`, display_df$`E-value`), ]
+      # Sort by identity percentage (descending) and E-value (ascending)
+      display_df <- display_df[order(-display_df$`Identity %`, display_df$`E-value`), ]
       
     } else {
       # Fallback for non-BLAST results
@@ -245,7 +262,7 @@
       options = list(
         pageLength = 15,
         scrollX = TRUE,
-        order = list(list(2, 'asc'))  # Sort by Gene Symbol
+        order = list(list(4, 'desc'))  # Sort by Identity % (descending)
       ),
       rownames = FALSE,
       selection = 'single'
@@ -419,6 +436,305 @@
         xaxis = list(visible = FALSE),
         yaxis = list(visible = FALSE)
       )
+  }
+  
+  #===============================================================================
+  # MULTI-GENE BLAST VISUALIZATION - CLEANED UP
+  #===============================================================================
+  
+  # Create combined isoform-centric BLAST plot with sequential gene faceting
+  create_combined_isoform_blast_plot <- function(transcript_data_list, gene_transcript_mapping, 
+                                                query_peptide, enzyme, use_compression = TRUE) {
+    tryCatch({
+      cat("DEBUG: Creating combined plot for", length(transcript_data_list), "transcripts\n")
+      
+      # Prepare combined data frame for ggplot
+      plot_data_list <- list()
+      
+      # Process each gene sequentially (NO global y_offset - faceting will handle gene separation)
+      unique_genes <- names(gene_transcript_mapping)
+      
+      for (gene_id in unique_genes) {
+        gene_info <- gene_transcript_mapping[[gene_id]]
+        gene_transcripts <- gene_info$all_transcripts
+        
+        cat("DEBUG: Processing gene", gene_id, "with", length(gene_transcripts), "transcripts\n")
+        
+        # Process each transcript in this gene (reset y-position for each gene)
+        for (j in seq_along(gene_transcripts)) {
+          transcript_id <- gene_transcripts[j]
+          transcript_key <- paste0(gene_id, "_", transcript_id)
+          
+          if (!transcript_key %in% names(transcript_data_list)) {
+            cat("WARNING: Transcript data not found for", transcript_key, "\n")
+            next
+          }
+          
+          transcript_data <- transcript_data_list[[transcript_key]]
+          current_y <- j  # Reset y-position for each gene (1, 2, 3, etc.)
+          
+          cat("DEBUG: Transcript", transcript_id, "assigned y-position:", current_y, "in gene", gene_id, "\n")
+          
+          # Add exon/CDS structure data
+          if (!is.null(transcript_data$exons) && length(transcript_data$exons) > 0) {
+            # Create exon rectangles
+            exon_data <- data.frame(
+              gene_id = gene_id,
+              gene_symbol = transcript_data$gene_symbol,
+              transcript_id = transcript_id,
+              transcript_label = transcript_id,  # For y-axis labeling
+              element_type = "exon",
+              start = start(transcript_data$exons),
+              end = end(transcript_data$exons),
+              y_position = current_y,
+              y_min = current_y - 0.15,
+              y_max = current_y + 0.15,
+              has_blast_match = transcript_data$has_blast_match,
+              stringsAsFactors = FALSE
+            )
+            plot_data_list[[paste0(transcript_key, "_exons")]] <- exon_data
+          }
+          
+          # Add CDS data if available
+          if (!is.null(transcript_data$cds) && length(transcript_data$cds) > 0) {
+            cds_data <- data.frame(
+              gene_id = gene_id,
+              gene_symbol = transcript_data$gene_symbol,
+              transcript_id = transcript_id,
+              transcript_label = transcript_id,
+              element_type = "cds",
+              start = start(transcript_data$cds),
+              end = end(transcript_data$cds),
+              y_position = current_y,
+              y_min = current_y - 0.1,
+              y_max = current_y + 0.1,
+              has_blast_match = transcript_data$has_blast_match,
+              stringsAsFactors = FALSE
+            )
+            plot_data_list[[paste0(transcript_key, "_cds")]] <- cds_data
+          }
+          
+          # Add digestible peptides (isoform-centric view)
+          if (!is.null(transcript_data$gene_peptides) && !is.null(transcript_data$gene_peptides$peptides)) {
+            gene_peptides_data <- transcript_data$gene_peptides$peptides
+            
+            # Get peptides for this transcript and enzyme
+            tx_rows <- which(gene_peptides_data$txID == transcript_id)
+            if (length(tx_rows) > 0) {
+              # Get enzyme-specific mapped ranges
+              enzyme_mapped_ranges_col <- paste0(enzyme, "Peps_mapped_ranges")
+              
+              if (enzyme_mapped_ranges_col %in% names(gene_peptides_data)) {
+                mapped_ranges_list <- gene_peptides_data[[enzyme_mapped_ranges_col]]
+                if (!is.null(mapped_ranges_list) && length(mapped_ranges_list) >= tx_rows[1]) {
+                  genomic_ranges <- mapped_ranges_list[[tx_rows[1]]]
+                  
+                  if (!is.null(genomic_ranges) && length(genomic_ranges) > 0) {
+                    # Create peptide data
+                    peptide_data <- data.frame(
+                      gene_id = gene_id,
+                      gene_symbol = transcript_data$gene_symbol,
+                      transcript_id = transcript_id,
+                      transcript_label = transcript_id,
+                      element_type = "peptide",
+                      start = start(genomic_ranges),
+                      end = end(genomic_ranges),
+                      y_position = current_y,
+                      y_min = current_y - 0.05,
+                      y_max = current_y + 0.05,
+                      has_blast_match = transcript_data$has_blast_match,
+                      stringsAsFactors = FALSE
+                    )
+                    plot_data_list[[paste0(transcript_key, "_peptides")]] <- peptide_data
+                  }
+                }
+              }
+            }
+          }
+          
+          # Add BLAST peptide overlay for matching transcripts
+          if (transcript_data$has_blast_match) {
+            # Map BLAST peptide to this transcript
+            transcript_structure <- list(
+              success = TRUE,
+              exons = gene_info$exons_by_transcript,
+              cds = gene_info$cds_by_transcript
+            )
+            
+            peptide_mapping <- map_blast_peptide_to_transcript(
+              blast_peptide = query_peptide,
+              transcript_id = transcript_id,
+              gene_id = gene_id,
+              transcript_structure = transcript_structure
+            )
+            
+            if (!is.null(peptide_mapping) && peptide_mapping$success && 
+                length(peptide_mapping$genomic_ranges) > 0) {
+              
+              blast_ranges <- peptide_mapping$genomic_ranges
+              blast_data <- data.frame(
+                gene_id = gene_id,
+                gene_symbol = transcript_data$gene_symbol,
+                transcript_id = transcript_id,
+                transcript_label = transcript_id,
+                element_type = "blast_overlay",
+                start = start(blast_ranges),
+                end = end(blast_ranges),
+                y_position = current_y,
+                y_min = current_y - 0.08,
+                y_max = current_y + 0.08,
+                has_blast_match = TRUE,
+                stringsAsFactors = FALSE
+              )
+              plot_data_list[[paste0(transcript_key, "_blast")]] <- blast_data
+            }
+          }
+        }
+        
+        # Gene separation handled by faceting, no need for y_offset
+      }
+      
+      # Combine all plot data
+      if (length(plot_data_list) == 0) {
+        return(NULL)
+      }
+      
+      combined_data <- do.call(rbind, plot_data_list)
+      combined_data$gene_symbol <- factor(combined_data$gene_symbol, levels = unique(combined_data$gene_symbol))
+      
+      cat("DEBUG: Combined data has", nrow(combined_data), "elements\n")
+      cat("DEBUG: Unique genes:", paste(unique(combined_data$gene_symbol), collapse = ", "), "\n")
+      cat("DEBUG: Y-position range:", min(combined_data$y_position), "to", max(combined_data$y_position), "\n")
+      
+      # Create transcript labels for y-axis (using base R to avoid dplyr dependency)
+      transcript_labels_data <- unique(combined_data[, c("gene_symbol", "transcript_id", "y_position")])
+      transcript_labels_data <- transcript_labels_data[order(transcript_labels_data$gene_symbol, transcript_labels_data$y_position), ]
+      
+      cat("DEBUG: Created labels for", nrow(transcript_labels_data), "transcripts\n")
+      
+      # Create the ggplot with proper faceting and transcript labels
+      p <- ggplot(combined_data) +
+        theme_minimal() +
+        theme(
+          strip.text = element_text(size = 12, face = "bold"),
+          plot.title = element_text(size = 14, face = "bold"),
+          axis.title.y = element_text(size = 11),
+          axis.text.y = element_text(size = 9),
+          panel.grid.major.y = element_blank(),
+          panel.grid.minor.y = element_blank(),
+          panel.spacing = unit(0.5, "lines")  # Space between gene facets
+        )
+      
+      # Add different elements with isoform-centric styling (matching your example)
+      exon_data <- combined_data[combined_data$element_type == "exon", ]
+      if (nrow(exon_data) > 0) {
+        p <- p + geom_rect(
+          data = exon_data,
+          aes(xmin = start, xmax = end, ymin = y_min, ymax = y_max),
+          fill = "#E8F4FD", color = "#B0C4DE", alpha = 0.7, size = 0.3
+        )
+      }
+      
+      cds_data <- combined_data[combined_data$element_type == "cds", ]
+      if (nrow(cds_data) > 0) {
+        p <- p + geom_rect(
+          data = cds_data,
+          aes(xmin = start, xmax = end, ymin = y_min, ymax = y_max),
+          fill = "#FFE4B5", color = "#DAA520", alpha = 0.9, size = 0.3
+        )
+      }
+      
+      peptide_data <- combined_data[combined_data$element_type == "peptide", ]
+      if (nrow(peptide_data) > 0) {
+        p <- p + geom_rect(
+          data = peptide_data,
+          aes(xmin = start, xmax = end, ymin = y_min, ymax = y_max),
+          fill = "orange", color = "darkorange", alpha = 0.8, size = 0.2
+        )
+      }
+      
+      blast_data <- combined_data[combined_data$element_type == "blast_overlay", ]
+      if (nrow(blast_data) > 0) {
+        p <- p + geom_rect(
+          data = blast_data,
+          aes(xmin = start, xmax = end, ymin = y_min, ymax = y_max),
+          fill = "#FF6B6B", color = "#D63031", alpha = 0.9, size = 0.6
+        )
+      }
+      
+      # Add transcript ID labels on y-axis 
+      y_breaks <- transcript_labels_data$y_position
+      y_labels <- transcript_labels_data$transcript_id
+      
+      p <- p + scale_y_continuous(
+        breaks = y_breaks,
+        labels = y_labels,
+        name = "Transcripts"
+      )
+      
+      # Add gene faceting (sequential, one below another)
+      p <- p + facet_grid(gene_symbol ~ ., 
+                          scales = "free", 
+                          space = "free_y",
+                          labeller = labeller(gene_symbol = function(x) paste0(x, " Gene")))
+      
+      # Add labels and title
+      p <- p + labs(
+        title = paste0("Multi-Gene BLAST Visualization (100% Identity Matches)"),
+        subtitle = paste0("Query: ", substr(query_peptide, 1, 50), 
+                         ifelse(nchar(query_peptide) > 50, "...", ""), 
+                         " | Enzyme: ", toupper(enzyme)),
+        x = "Genomic Position (bp)",
+        y = "Transcripts"
+      )
+      
+      # Add a simple legend by adding invisible points
+      p <- p + 
+        geom_point(aes(x = Inf, y = Inf, color = "Exons"), alpha = 0) +
+        geom_point(aes(x = Inf, y = Inf, color = "CDS"), alpha = 0) +
+        geom_point(aes(x = Inf, y = Inf, color = "Peptides"), alpha = 0) +
+        geom_point(aes(x = Inf, y = Inf, color = "BLAST Match"), alpha = 0) +
+        scale_color_manual(
+          name = "Elements",
+          values = c("Exons" = "#B0C4DE", "CDS" = "#DAA520", 
+                    "Peptides" = "darkorange", "BLAST Match" = "#D63031"),
+          guide = guide_legend(override.aes = list(alpha = 1, size = 3))
+        )
+      
+      # Convert to plotly with improved settings
+      plotly_obj <- ggplotly(p, tooltip = c("text")) %>%
+        config(
+          displayModeBar = TRUE,
+          displaylogo = FALSE,
+          modeBarButtonsToRemove = c("pan2d", "select2d", "lasso2d", "autoScale2d")
+        ) %>%
+        layout(
+          title = list(
+            text = paste0("Multi-Gene BLAST Visualization<br>Query: ", 
+                         substr(query_peptide, 1, 60), 
+                         ifelse(nchar(query_peptide) > 60, "...", "")),
+            font = list(size = 14),
+            x = 0.05,
+            xanchor = 'left'
+          ),
+          margin = list(l = 150, r = 50, t = 120, b = 80),  # More space for transcript labels
+          showlegend = TRUE,
+          legend = list(
+            x = 1.02,
+            y = 1,
+            xanchor = 'left',
+            bgcolor = 'rgba(255,255,255,0.8)',
+            bordercolor = 'rgba(0,0,0,0.2)',
+            borderwidth = 1
+          )
+        )
+      
+      return(plotly_obj)
+      
+    }, error = function(e) {
+      cat("ERROR in create_combined_isoform_blast_plot:", e$message, "\n")
+      return(NULL)
+    })
   }
   
   # Cached GTF visualization using gene-first approach for BLAST transcripts
@@ -772,65 +1088,274 @@
     })
   }
   
-  # State management for visualization display
-  blast_visualization_state <- reactiveVal(FALSE)
+  # State management for multi-gene visualization display
+  multi_gene_blast_viz_state <- reactiveVal(FALSE)
+  multi_gene_blast_data <- reactiveVal(NULL)
   
-  # Detect 100% match selection - SAFE: No changes to existing functionality
-  output$blast_perfect_match_selected <- reactive({
+  # Detect 100% perfect matches availability for multi-gene visualization
+  output$blast_perfect_matches_available <- reactive({
     tryCatch({
-      selected_row <- input$peptide_search_results_table_rows_selected
       results <- peptide_search_results()
       
-      if (is.null(selected_row) || is.null(results) || length(selected_row) == 0) {
-        # Reset visualization state when no row selected
-        blast_visualization_state(FALSE)
+      if (is.null(results) || nrow(results) == 0) {
+        multi_gene_blast_viz_state(FALSE)
         return(FALSE)
       }
       
-      if (selected_row[1] > nrow(results)) {
-        blast_visualization_state(FALSE)
-        return(FALSE)
+      # Check for any 100% identity matches
+      perfect_matches <- results[!is.na(results$identity_percent) & results$identity_percent == 100, ]
+      has_perfect_matches <- nrow(perfect_matches) > 0
+      
+      if (!has_perfect_matches) {
+        multi_gene_blast_viz_state(FALSE)
       }
       
-      identity <- results$identity_percent[selected_row[1]]
-      is_perfect_match <- !is.na(identity) && identity == 100
-      
-      # Reset visualization state when different row is selected
-      if (!is_perfect_match) {
-        blast_visualization_state(FALSE)
-      }
-      
-      return(is_perfect_match)
+      return(has_perfect_matches)
     }, error = function(e) {
-      cat("DEBUG: blast_perfect_match_selected error:", e$message, "\n")
-      blast_visualization_state(FALSE)
-      return(FALSE)  # Fail safely - existing functionality unaffected
+      cat("DEBUG: blast_perfect_matches_available error:", e$message, "\n")
+      multi_gene_blast_viz_state(FALSE)
+      return(FALSE)
     })
   })
-  outputOptions(output, "blast_perfect_match_selected", suspendWhenHidden = FALSE)
+  outputOptions(output, "blast_perfect_matches_available", suspendWhenHidden = FALSE)
   
-  # Control visualization visibility based on button clicks
-  output$blast_visualization_visible <- reactive({
-    return(blast_visualization_state())
+  # Gene tabs UI for multi-gene BLAST visualization
+  output$gene_tabs_ui <- renderUI({
+    tryCatch({
+      # Use stored data instead of recreating to ensure consistency
+      stored_data <- multi_gene_blast_data()
+      
+      if (is.null(stored_data) || !stored_data$success) {
+        return(div("No BLAST visualization data available"))
+      }
+      
+      # Get data from stored results
+      perfect_matches <- stored_data$perfect_matches
+      unique_genes <- data.frame(
+        gene_id = stored_data$unique_genes,
+        gene_symbol = stored_data$gene_symbols,
+        stringsAsFactors = FALSE
+      )
+      
+      if (nrow(perfect_matches) == 0 || nrow(unique_genes) == 0) {
+        return(div("No valid gene information available"))
+      }
+      
+      cat("DEBUG: Creating tabs for", nrow(unique_genes), "genes\n")
+      
+      # Create tab panels for each gene
+      tab_panels <- lapply(1:nrow(unique_genes), function(i) {
+        gene_info <- unique_genes[i, ]
+        gene_id <- gene_info$gene_id
+        gene_symbol <- gene_info$gene_symbol
+        
+        # Create unique plot output ID for this gene
+        plot_output_id <- paste0("gene_blast_plot_", gsub("[^A-Za-z0-9]", "_", gene_id))
+        
+        tabPanel(
+          title = paste0(gene_symbol, " (", gene_id, ")"),
+          value = paste0("tab_", gene_id),
+          fluidRow(
+            column(12,
+              div(
+                style = "margin-top: 15px;",
+                plotlyOutput(plot_output_id, height = "500px")
+              )
+            )
+          )
+        )
+      })
+      
+      # Create the tabsetPanel
+      do.call(tabsetPanel, c(
+        list(id = "gene_blast_tabs", type = "tabs"),
+        tab_panels
+      ))
+      
+    }, error = function(e) {
+      cat("DEBUG: gene_tabs_ui error:", e$message, "\n")
+      return(div(paste("Error creating gene tabs:", e$message)))
+    })
   })
-  outputOptions(output, "blast_visualization_visible", suspendWhenHidden = FALSE)
   
-  # Show visualization when button is clicked
-  observeEvent(input$show_blast_visualization, {
-    cat("DEBUG: Show visualization button clicked\n")
-    blast_visualization_state(TRUE)
+  # Dynamic server logic for individual gene plots - REACTIVE VERSION
+  observeEvent(list(input$blast_viz_enzyme, input$blast_viz_miscleavage, input$blast_viz_intron_scale, multi_gene_blast_data()), {
+    tryCatch({
+      # Use stored data from multi_gene_blast_data instead of recreating
+      stored_data <- multi_gene_blast_data()
+      
+      if (is.null(stored_data) || !stored_data$success) {
+        return()
+      }
+      
+      # Get data from stored results (ensures consistency)
+      perfect_matches <- stored_data$perfect_matches
+      unique_genes <- data.frame(
+        gene_id = stored_data$unique_genes,
+        gene_symbol = stored_data$gene_symbols,
+        stringsAsFactors = FALSE
+      )
+      
+      if (nrow(perfect_matches) == 0 || nrow(unique_genes) == 0) {
+        return()
+      }
+      
+      cat("DEBUG: Recreating renderPlotly outputs due to input changes\n")
+      
+      # Create plot outputs for each gene - using local() to capture variables by value
+      for (i in 1:nrow(unique_genes)) {
+        local({
+          gene_info <- unique_genes[i, ]
+          gene_id <- gene_info$gene_id
+          gene_symbol <- gene_info$gene_symbol
+          
+          # Create plot output ID
+          plot_output_id <- paste0("gene_blast_plot_", gsub("[^A-Za-z0-9]", "_", gene_id))
+          
+          cat("DEBUG: Creating renderPlotly for gene:", gene_id, "with output ID:", plot_output_id, "\n")
+          
+          # Create the renderPlotly for this gene - now recreated when inputs change
+          output[[plot_output_id]] <- renderPlotly({
+            req(input$blast_viz_enzyme, input$blast_viz_miscleavage)
+            
+            create_gene_blast_visualization(gene_id, gene_symbol, perfect_matches)
+          })
+        })
+      }
+      
+    }, error = function(e) {
+      cat("DEBUG: Dynamic gene plot creation error:", e$message, "\n")
+    })
+  }, ignoreNULL = FALSE)
+  
+  # Control multi-gene visualization visibility 
+  output$multi_gene_blast_viz_available <- reactive({
+    return(multi_gene_blast_viz_state())
+  })
+  outputOptions(output, "multi_gene_blast_viz_available", suspendWhenHidden = FALSE)
+  
+  # Hide multi-gene visualization when hide button is clicked
+  observeEvent(input$hide_multi_gene_blast_viz, {
+    cat("DEBUG: Hide multi-gene visualization button clicked\n")
+    multi_gene_blast_viz_state(FALSE)
   })
   
-  # Hide visualization when hide button is clicked
-  observeEvent(input$hide_blast_visualization, {
-    cat("DEBUG: Hide visualization button clicked\n")
-    blast_visualization_state(FALSE)
+  # Summary text for perfect matches
+  output$blast_perfect_matches_summary <- renderText({
+    tryCatch({
+      results <- peptide_search_results()
+      
+      if (is.null(results) || nrow(results) == 0) {
+        return("No BLAST results available")
+      }
+      
+      # Filter to 100% identity matches
+      perfect_matches <- results[!is.na(results$identity_percent) & results$identity_percent == 100, ]
+      
+      if (nrow(perfect_matches) == 0) {
+        return("No 100% identity matches found")
+      }
+      
+      # Count unique genes and transcripts
+      unique_genes <- length(unique(perfect_matches$gene_id))
+      unique_transcripts <- length(unique(perfect_matches$transcript_id))
+      
+      return(paste0("Found ", nrow(perfect_matches), " perfect matches across ", 
+                   unique_genes, " genes and ", unique_transcripts, " transcript isoforms"))
+      
+    }, error = function(e) {
+      cat("DEBUG: blast_perfect_matches_summary error:", e$message, "\n")
+      return("Error displaying match summary")
+    })
   })
   
   # Reset visualization state when new search is performed
   observeEvent(input$run_peptide_search, {
     cat("DEBUG: New search - resetting visualization state\n")
-    blast_visualization_state(FALSE)
+    multi_gene_blast_viz_state(FALSE)
+    multi_gene_blast_data(NULL)
+  })
+  
+  # Generate multi-gene BLAST visualization
+  observeEvent(input$generate_multi_gene_blast_viz, {
+    req(input$blast_viz_enzyme, input$blast_viz_miscleavage, input$peptide_search_query)
+    
+    # Source compression functions if not already loaded
+    if (!exists("create_compression_map")) {
+      source("R/coordinate_compression.R")
+    }
+    
+    results <- peptide_search_results()
+    if (is.null(results) || nrow(results) == 0) {
+      showNotification("No BLAST results available", type = "warning")
+      return()
+    }
+    
+    # Filter to 100% identity matches only
+    perfect_matches <- results[!is.na(results$identity_percent) & results$identity_percent == 100, ]
+    if (nrow(perfect_matches) == 0) {
+      showNotification("No 100% identity matches found", type = "warning")
+      return()
+    }
+    
+    unique_genes <- unique(perfect_matches$gene_id)
+    query_peptide <- input$peptide_search_query
+    
+    withProgress(message = "Creating multi-gene BLAST visualization...", value = 0, {
+      incProgress(0.1, detail = paste("Processing", length(unique_genes), "genes..."))
+      
+      tryCatch({
+        # Create gene tabs directly using the working tab system
+        incProgress(0.8, detail = "Creating gene tabs...")
+        
+        # Prepare gene data for tabs
+        gene_symbols <- sapply(unique_genes, function(gene_id) {
+          gtf_data <- load_gtf_visualization_data(gene_id)
+          if (gtf_data$success) gtf_data$gene_symbol else gene_id
+        })
+        
+        # Store data for tabs to use
+        multi_gene_blast_data(list(
+          success = TRUE,
+          unique_genes = unique_genes,
+          gene_symbols = gene_symbols,
+          perfect_matches = perfect_matches
+        ))
+        multi_gene_blast_viz_state(TRUE)
+        
+        showNotification(
+          paste("Successfully created gene tabs for", length(unique_genes), "genes"),
+          type = "message",
+          duration = 5
+        )
+        
+      }, error = function(e) {
+        cat("ERROR in generate_multi_gene_blast_viz:", e$message, "\n")
+        multi_gene_blast_data(NULL)
+        multi_gene_blast_viz_state(FALSE)
+        showNotification(paste("Visualization error:", e$message), type = "error")
+      })
+    })
+  })
+  
+  # Multi-gene BLAST plot output
+  output$multi_gene_blast_plot <- renderPlotly({
+    tryCatch({
+      req(multi_gene_blast_viz_state() == TRUE)
+      
+      viz_data <- multi_gene_blast_data()
+      if (is.null(viz_data) || !viz_data$success) {
+        return(empty_plotly_message("No visualization data available"))
+      }
+      
+      cat("DEBUG: Rendering multi-gene BLAST plot\n")
+      
+      return(viz_data$plot)
+      
+    }, error = function(e) {
+      cat("ERROR in multi_gene_blast_plot:", e$message, "\n")
+      return(empty_plotly_message("Error rendering multi-gene plot"))
+    })
   })
   
   # Show selected match info - SAFE: Independent display function
@@ -1037,4 +1562,390 @@
       cat("Download functionality will be implemented with visualization\n")
     }
   )
+  
+  #===============================================================================
+  # GENE-SPECIFIC BLAST VISUALIZATION FUNCTION
+  #===============================================================================
+  
+  create_gene_blast_visualization <- function(gene_id, gene_symbol, perfect_matches) {
+    tryCatch({
+      cat("DEBUG: Creating BLAST visualization for gene:", gene_id, "\n")
+      
+      # Step 1: Get selected enzyme and miscleavage from UI controls
+      selected_enzyme <- if(is.null(input$blast_viz_enzyme)) "trp" else input$blast_viz_enzyme
+      selected_miscleavage <- if(is.null(input$blast_viz_miscleavage)) "no_miss_cleavage" else input$blast_viz_miscleavage
+      
+      # Get intron display setting
+      use_compression <- !is.null(input$blast_viz_intron_scale) && input$blast_viz_intron_scale == "compressed"
+      cat("DEBUG: Intron display mode:", ifelse(use_compression, "compressed", "true_scale"), "\n")
+      
+      cat("DEBUG: Using enzyme:", selected_enzyme, "miscleavage:", selected_miscleavage, "\n")
+      
+      # Step 2: Load pre-computed GTF data for gene structure
+      gtf_data <- load_gtf_visualization_data(gene_id)
+      
+      if (!gtf_data$success) {
+        return(empty_plotly_message(gtf_data$message))
+      }
+      
+      # Step 3: Extract GTF structure data
+      exons_by_transcript <- gtf_data$exons_by_transcript
+      cds_by_transcript <- gtf_data$cds_by_transcript
+      transcript_ids <- gtf_data$transcript_ids
+      
+      if (length(transcript_ids) == 0) {
+        return(empty_plotly_message("No transcripts found for this gene"))
+      }
+      
+      # Step 4: Load gene peptide data from RDS file
+      gene_file <- paste0("data/genes/", selected_miscleavage, "/", gene_id, ".rds")
+      gene_peptides <- NULL
+      
+      if (file.exists(gene_file)) {
+        cat("DEBUG: Loading gene peptides from:", gene_file, "\n")
+        gene_peptides <- readRDS(gene_file)
+        cat("DEBUG: Loaded gene data with", nrow(gene_peptides), "rows\n")
+      } else {
+        cat("DEBUG: Gene peptide file not found:", gene_file, "\n")
+      }
+      
+      # Step 5: Create compression map if needed
+      compression_map <- NULL
+      if (use_compression && length(exons_by_transcript) > 0) {
+        cat("DEBUG: Creating compression map for exons\n")
+        compression_map <- create_compression_map(exons_by_transcript)
+      }
+      
+      # Step 6: Use gene boundaries with proper scaling
+      padding <- 1000  # Reduced padding for better scaling
+      gene_start <- gtf_data$gene_start - padding
+      gene_end <- gtf_data$gene_end + padding
+      chromosome <- gtf_data$chromosome
+      
+      # Apply compression to gene boundaries if needed
+      plot_gene_start <- gene_start
+      plot_gene_end <- gene_end
+      if (use_compression && !is.null(compression_map)) {
+        plot_gene_start <- compression_map$compress(gene_start)
+        plot_gene_end <- compression_map$compress(gene_end)
+        cat("DEBUG: Compressed gene range from", gene_start, "-", gene_end, "to", plot_gene_start, "-", plot_gene_end, "\n")
+      }
+      
+      # Step 7: Create plot data frames
+      transcript_df <- data.frame(
+        transcript = transcript_ids,
+        y_position = seq_along(transcript_ids),
+        stringsAsFactors = FALSE
+      )
+      
+      # Initialize data frames
+      exon_df <- data.frame(
+        transcript = character(), y_position = numeric(), start = numeric(), 
+        end = numeric(), exon_number = integer(), stringsAsFactors = FALSE
+      )
+      
+      cds_df <- data.frame(
+        transcript = character(), y_position = numeric(), start = numeric(),
+        end = numeric(), cds_number = integer(), stringsAsFactors = FALSE
+      )
+      
+      peptide_df <- data.frame(
+        transcript = character(), y_position = numeric(), start = numeric(),
+        end = numeric(), peptide = character(), hover_text = character(), 
+        stringsAsFactors = FALSE
+      )
+      
+      # Step 7: Process transcripts and load peptide data
+      for (i in seq_along(transcript_ids)) {
+        tx <- transcript_ids[i]
+        
+        # Add exons
+        if (tx %in% names(exons_by_transcript) && length(exons_by_transcript[[tx]]) > 0) {
+          tx_exons <- exons_by_transcript[[tx]]
+          tx_exons <- tx_exons[order(start(tx_exons))]
+          
+          for (j in seq_along(tx_exons)) {
+            exon_start <- start(tx_exons[j])
+            exon_end <- end(tx_exons[j])
+            
+            # Apply compression if enabled
+            if (use_compression && !is.null(compression_map)) {
+              exon_start <- compression_map$compress(exon_start)
+              exon_end <- compression_map$compress(exon_end)
+            }
+            
+            exon_df <- rbind(exon_df, data.frame(
+              transcript = tx, y_position = i, start = exon_start,
+              end = exon_end, exon_number = j, stringsAsFactors = FALSE
+            ))
+          }
+        }
+        
+        # Add CDS
+        if (tx %in% names(cds_by_transcript) && length(cds_by_transcript[[tx]]) > 0) {
+          tx_cds <- cds_by_transcript[[tx]]
+          tx_cds <- tx_cds[order(start(tx_cds))]
+          
+          for (j in seq_along(tx_cds)) {
+            cds_start <- start(tx_cds[j])
+            cds_end <- end(tx_cds[j])
+            
+            # Apply compression if enabled
+            if (use_compression && !is.null(compression_map)) {
+              cds_start <- compression_map$compress(cds_start)
+              cds_end <- compression_map$compress(cds_end)
+            }
+            
+            cds_df <- rbind(cds_df, data.frame(
+              transcript = tx, y_position = i, start = cds_start,
+              end = cds_end, cds_number = j, stringsAsFactors = FALSE
+            ))
+          }
+        }
+        
+        # Add peptides from gene data
+        if (!is.null(gene_peptides)) {
+          # Find which row in gene_peptides corresponds to this transcript
+          tx_row <- which(gene_peptides$txID == tx)
+          
+          if (length(tx_row) > 0) {
+            mapped_ranges_col <- paste0(selected_enzyme, "Peps_mapped_ranges")
+            
+            if (mapped_ranges_col %in% names(gene_peptides)) {
+              mapped_ranges_list <- gene_peptides[[mapped_ranges_col]]
+              
+              if (!is.null(mapped_ranges_list) && length(mapped_ranges_list) >= tx_row[1]) {
+                # Get the mapped ranges for THIS specific transcript
+                mapped_ranges <- mapped_ranges_list[[tx_row[1]]]
+                
+                if (class(mapped_ranges)[1] == "GRanges" && length(mapped_ranges) > 0) {
+                  # Get peptide sequences from metadata
+                  peptide_seqs <- mcols(mapped_ranges)$peptide
+                  
+                  for (k in 1:length(mapped_ranges)) {
+                    range_k <- mapped_ranges[k]
+                    peptide_seq <- if (!is.null(peptide_seqs)) peptide_seqs[k] else paste("Peptide", k)
+                    
+                    pep_start <- start(range_k)
+                    pep_end <- end(range_k)
+                    original_start <- pep_start  # Keep original for hover text
+                    original_end <- pep_end
+                    
+                    # Apply compression if enabled
+                    if (use_compression && !is.null(compression_map)) {
+                      pep_start <- compression_map$compress(pep_start)
+                      pep_end <- compression_map$compress(pep_end)
+                    }
+                    
+                    peptide_df <- rbind(peptide_df, data.frame(
+                      transcript = tx,
+                      y_position = i,
+                      start = pep_start,
+                      end = pep_end,
+                      peptide = peptide_seq,
+                      hover_text = clean_hover_text(paste0(
+                        "Peptide: ", peptide_seq,
+                        "<br>Position: ", original_start, "-", original_end,
+                        "<br>Transcript: ", tx
+                      )),
+                      stringsAsFactors = FALSE
+                    ))
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+      
+      # Step 8: Create the base plot
+      p <- ggplot() +
+        # Add transcript lines
+        geom_segment(data = transcript_df, 
+                    aes(x = gene_start, xend = gene_end, y = y_position, yend = y_position),
+                    linewidth = 0.5, color = "grey70") +
+        
+        # Add exon blocks
+        geom_rect(data = exon_df,
+                 aes(xmin = start, xmax = end, ymin = y_position - 0.3, ymax = y_position + 0.3,
+                     fill = "Exons"), color = "black") +
+        
+        # Add CDS overlay
+        geom_rect(data = cds_df,
+                 aes(xmin = start, xmax = end, ymin = y_position - 0.25, ymax = y_position + 0.25,
+                     fill = "CDS"), color = "black") +
+        
+        # Add peptide overlays (only if peptide data is available)
+        {if (nrow(peptide_df) > 0) {
+          geom_rect(data = peptide_df,
+                   aes(xmin = start, xmax = end, ymin = y_position - 0.15, ymax = y_position + 0.15,
+                       fill = "Peptides", text = hover_text), color = "black", linewidth = 0.2)
+        } else {
+          NULL
+        }} +
+        
+        # Add transcript labels
+        geom_text(data = transcript_df,
+                 aes(x = plot_gene_start - 100, y = y_position, label = transcript),
+                 hjust = 1, size = 3.5)
+      
+      # Step 9: Collect BLAST peptide overlay data using R_backup working pattern
+      gene_perfect_matches <- perfect_matches[perfect_matches$gene_id == gene_id, ]
+      matching_transcripts <- unique(gene_perfect_matches$transcript_id)
+      
+      # Initialize BLAST overlay data frame to collect all data first
+      blast_overlay_df <- data.frame(
+        start = numeric(), end = numeric(), y_min = numeric(), y_max = numeric(),
+        transcript = character(), hover_text = character(), stringsAsFactors = FALSE
+      )
+      
+      if (length(matching_transcripts) > 0) {
+        cat("DEBUG: Collecting BLAST overlay data for", length(matching_transcripts), "transcripts with 100% matches\n")
+        
+        # Load gene details using R_backup pattern
+        cache_file <- find_gtf_cache_file(gene_id)
+        if (!is.null(cache_file)) {
+          gene_details <- readRDS(cache_file)
+          
+          if (!is.null(gene_details)) {
+            # Create transcript_structure using R_backup pattern
+            transcript_structure <- list(
+              success = TRUE,
+              exons = gene_details$exons_by_transcript,
+              cds = gene_details$cds_by_transcript
+            )
+            
+            cat("DEBUG: Successfully created transcript structure for", gene_id, "\n")
+            
+            # Collect BLAST peptide data for each transcript with 100% match
+            for (transcript_id in matching_transcripts) {
+              cat("DEBUG: Mapping BLAST peptide to transcript", transcript_id, "\n")
+              
+              peptide_mapping <- map_blast_peptide_to_transcript(
+                blast_peptide = input$peptide_search_query,
+                transcript_id = transcript_id,
+                gene_id = gene_id,
+                transcript_structure = transcript_structure
+              )
+              
+              if (!is.null(peptide_mapping) && peptide_mapping$success) {
+                blast_ranges <- peptide_mapping$genomic_ranges
+                transcript_y <- which(transcript_ids == transcript_id)
+                
+                if (length(transcript_y) > 0 && length(blast_ranges) > 0) {
+                  cat("DEBUG: Collecting BLAST overlay data for transcript", transcript_id, "at y-position", transcript_y, "\n")
+                  
+                  # Get coordinates and apply compression like R_backup
+                  blast_starts <- start(blast_ranges)
+                  blast_ends <- end(blast_ranges)
+                  
+                  if (use_compression && !is.null(compression_map)) {
+                    blast_starts <- sapply(blast_starts, compression_map$compress)
+                    blast_ends <- sapply(blast_ends, compression_map$compress)
+                  }
+                  
+                  # Add to BLAST overlay data frame (thicker than exons)
+                  transcript_blast_data <- data.frame(
+                    start = blast_starts,
+                    end = blast_ends,
+                    y_min = transcript_y - 0.35,  # Thicker than exons (±0.3)
+                    y_max = transcript_y + 0.35,
+                    transcript = transcript_id,
+                    hover_text = paste0("BLAST: ", input$peptide_search_query, " | ", blast_starts, "-", blast_ends),
+                    stringsAsFactors = FALSE
+                  )
+                  
+                  blast_overlay_df <- rbind(blast_overlay_df, transcript_blast_data)
+                }
+              }
+            }
+          }
+        }
+      }
+      
+      # Add single BLAST overlay layer if we have data (R_backup pattern)
+      if (nrow(blast_overlay_df) > 0) {
+        cat("DEBUG: Adding BLAST overlay layer with", nrow(blast_overlay_df), "segments\n")
+        p <- p + geom_rect(
+          data = blast_overlay_df,
+          aes(xmin = start, xmax = end, ymin = y_min, ymax = y_max, fill = "BLAST Match", text = hover_text),
+          color = "#d63031",
+          linewidth = 0.5
+        )
+      }
+      
+      # Step 10: Styling and legend
+      has_cds <- nrow(cds_df) > 0
+      has_peptides <- nrow(peptide_df) > 0
+      has_blast <- length(matching_transcripts) > 0
+      
+      fill_values <- c(
+        "Exons" = "rgba(77, 175, 74, 0.8)",
+        "CDS" = "rgba(255, 221, 0, 0.8)", 
+        "Peptides" = "rgba(255, 140, 0, 0.8)",  # Deeper orange color
+        "BLAST Match" = "rgba(255, 107, 107, 0.9)"
+      )
+      
+      fill_breaks <- c("Exons")
+      fill_labels <- c("Exons")
+      
+      if (has_cds) {
+        fill_breaks <- c(fill_breaks, "CDS")
+        fill_labels <- c(fill_labels, "CDS")
+      }
+      if (has_peptides) {
+        fill_breaks <- c(fill_breaks, "Peptides")
+        fill_labels <- c(fill_labels, "Peptides")
+      }
+      if (has_blast) {
+        fill_breaks <- c(fill_breaks, "BLAST Match")
+        fill_labels <- c(fill_labels, "BLAST Match")
+      }
+      
+      p <- p + 
+        scale_fill_manual(values = fill_values, breaks = fill_breaks, labels = fill_labels, name = "")
+      
+      # Add proper axis ticks for compression
+      if (use_compression && !is.null(compression_map)) {
+        axis_breaks <- compression_map$coords$compressed_start
+        axis_labels <- as.character(compression_map$coords$original_start)
+        
+        p <- p + scale_x_continuous(
+          name = paste0("Genomic Position (chromosome ", chromosome, " - compressed view)"),
+          breaks = axis_breaks,
+          labels = axis_labels
+        )
+      }
+      
+      p <- p +
+        theme_minimal() +
+        theme(
+          axis.title.y = element_blank(), axis.text.y = element_blank(), axis.ticks.y = element_blank(),
+          axis.text.x = element_text(angle = 45, hjust = 1), panel.grid.minor = element_blank(),
+          panel.grid.major.y = element_blank(), legend.position = "bottom", legend.box = "horizontal",
+          legend.margin = margin(6, 6, 6, 6)
+        ) +
+        labs(
+          x = if (!use_compression || is.null(compression_map)) paste0("Genomic Position (chromosome ", chromosome, ")") else NULL,
+          title = paste0("Gene: ", gene_symbol, " (", gene_id, ")"),
+          subtitle = paste0("Chromosome ", chromosome, " | Enzyme: ", selected_enzyme, 
+                           " | Miscleavage: ", selected_miscleavage,
+                           if(has_blast) " | Red = BLAST matches" else "")
+        ) +
+        coord_cartesian(xlim = c(plot_gene_start, plot_gene_end), ylim = c(0.5, length(transcript_ids) + 0.5))
+      
+      # Step 11: Convert to plotly using optimized function for legend interactivity
+      plotly_obj <- create_optimized_plotly(p) %>%
+        layout(
+          title = list(text = paste0("Gene: ", gene_symbol, " (", chromosome, ")"), font = list(size = 14)),
+          margin = list(l = 120, r = 50, t = 80, b = 50), yaxis = list(title = "Transcripts")
+        )
+      
+      return(plotly_obj)
+      
+    }, error = function(e) {
+      cat("DEBUG: create_gene_blast_visualization error:", e$message, "\n")
+      return(empty_plotly_message(paste("Error creating visualization:", e$message)))
+    })
+  }
   

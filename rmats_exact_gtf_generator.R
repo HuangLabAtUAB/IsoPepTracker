@@ -4,11 +4,19 @@
 
 library(data.table)
 
-# Source the EXACT working functions from rmats_peptide
-source('rmats_peptide/utils/coordinate_utils.R')
-source('rmats_peptide/modules/rmats_parser.R')  
-source('rmats_peptide/modules/flanking_exons.R')
-source('rmats_peptide/modules/protein_translation.R')
+# rMATS functions are loaded by the rMATS server context
+# This generator assumes the following functions are available:
+# - extract_event_coordinates()
+# - build_gtf_structures() 
+# - identify_flanking_exons()
+# - search_all_exons_in_cds()
+# - extract_phase_information()
+# - translate_isoforms()
+
+cat("=== rMATS EXACT GTF GENERATOR LOADED ===\n")
+cat("Usage: generate_rmats_gtf_with_phases(rmats_event, event_type)\n")
+cat("Supports event types: SE, A3SS, A5SS, MXE, RI\n")
+cat("Uses EXACT rmats_peptide implementation with proper phase handling\n")
 
 #===============================================================================
 # EXACT rMATS GTF GENERATOR FUNCTION
@@ -219,8 +227,8 @@ generate_isoform_gtf <- function(cds_gtf, rmats_event, isoform_type, event_type)
   gtf_lines <- c()
   
   # Create transcript ID and gene ID
-  transcript_id <- paste0('"', rmats_event$GeneID, '"', ".", isoform_type)
-  gene_id <- paste0('"', rmats_event$geneSymbol, '"', ".1")
+  transcript_id <- paste0('"', rmats_event$GeneID, ".", isoform_type, '"')
+  gene_id <- paste0('"', rmats_event$geneSymbol, '"')
   
   # Get chromosome and strand
   chromosome <- rmats_event$chr

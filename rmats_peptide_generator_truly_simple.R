@@ -151,7 +151,7 @@ generate_novel_peptide_data <- function(gtf_file, fasta_file, missedCleavages = 
       peptides <- cleaver::cleave(
         seq_i, 
         enzym = cleaver_enzyme,
-        missedCleavages = missedCleavages,
+        missedCleavages = if(missedCleavages == 0) 0 else 0:missedCleavages,
         custom = NULL, 
         unique = TRUE
       )

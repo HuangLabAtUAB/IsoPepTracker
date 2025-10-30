@@ -3,6 +3,70 @@
 # Extracted from server.R - Novel isoform discovery and analysis functionality
 #===============================================================================
 
+# FASTA validation function
+validate_fasta_text <- function(text_input) {
+  if (is.null(text_input) || trimws(text_input) == "") {
+    return(list(valid = FALSE, message = "Text input is empty"))
+  }
+  
+  lines <- strsplit(text_input, "\n")[[1]]
+  lines <- lines[nzchar(trimws(lines))]  # Remove empty lines
+  
+  if (length(lines) == 0) {
+    return(list(valid = FALSE, message = "No valid lines found in input"))
+  }
+  
+  # Check for FASTA headers
+  header_lines <- grep("^>", lines)
+  if (length(header_lines) == 0) {
+    return(list(valid = FALSE, message = "No FASTA headers found. Headers must start with '>'"))
+  }
+  
+  # Check that first line is a header
+  if (!grepl("^>", lines[1])) {
+    return(list(valid = FALSE, message = "First line must be a FASTA header starting with '>'"))
+  }
+  
+  # Validate sequence content
+  sequence_lines <- lines[-header_lines]
+  if (length(sequence_lines) == 0) {
+    return(list(valid = FALSE, message = "No sequence data found after headers"))
+  }
+  
+  # Check for valid nucleotide characters
+  all_sequence <- paste(sequence_lines, collapse = "")
+  invalid_chars <- gsub("[ATGCNRYSWKMBDHV-]", "", toupper(all_sequence))
+  if (nchar(invalid_chars) > 0) {
+    return(list(valid = FALSE, message = paste("Invalid characters found in sequences:", substr(invalid_chars, 1, 10))))
+  }
+  
+  # Check minimum sequence length
+  sequences <- c()
+  current_seq <- ""
+  for (line in lines) {
+    if (grepl("^>", line)) {
+      if (nchar(current_seq) > 0) {
+        sequences <- c(sequences, current_seq)
+      }
+      current_seq <- ""
+    } else {
+      current_seq <- paste0(current_seq, line)
+    }
+  }
+  if (nchar(current_seq) > 0) {
+    sequences <- c(sequences, current_seq)
+  }
+  
+  # Check for minimum length sequences
+  min_length <- 50  # Minimum reasonable sequence length
+  short_sequences <- sum(nchar(sequences) < min_length)
+  if (short_sequences > 0) {
+    return(list(valid = FALSE, message = paste("Found", short_sequences, "sequences shorter than", min_length, "nucleotides")))
+  }
+  
+  return(list(valid = TRUE, message = paste("Valid FASTA format with", length(sequences), "sequences")))
+}
+
 #' Novel Isoform Analysis Module
 #' 
 #' @description 
@@ -46,19 +110,47 @@ create_novel_isoform_analysis_module <- function(input, output, session) {
   
   # Run novel isoform pipeline when button is clicked
   observeEvent(input$run_novel_pipeline, {
-    req(input$novel_fasta_file)
-    
-    # Get uploaded file info
+    # Get inputs from both file upload and text area
     file_info <- input$novel_fasta_file
-    if (is.null(file_info)) {
-      showNotification("Please select a FASTA file to upload.", type = "warning")
+    text_input <- input$novel_fasta_text
+    
+    # Clean text input
+    if (!is.null(text_input)) {
+      text_input <- trimws(text_input)
+    }
+    
+    # Validate at least one input is provided
+    if ((is.null(file_info) || is.null(file_info$datapath)) && 
+        (is.null(text_input) || text_input == "")) {
+      showNotification("Please provide FASTA sequences via file upload or text input.", type = "warning")
       return()
     }
     
-    # Validate file extension
-    if (!grepl("\\.(fa|fasta|fas)$", file_info$name, ignore.case = TRUE)) {
-      showNotification("Please upload a valid FASTA file (.fa, .fasta, or .fas)", type = "error")
-      return()
+    # Determine input source and prepare file path
+    input_path <- NULL
+    temp_file_created <- FALSE
+    
+    if (!is.null(file_info) && !is.null(file_info$datapath)) {
+      # Use uploaded file
+      # Validate file extension
+      if (!grepl("\\.(fa|fasta|fas|txt)$", file_info$name, ignore.case = TRUE)) {
+        showNotification("Please upload a valid FASTA file (.fa, .fasta, .fas, or .txt)", type = "error")
+        return()
+      }
+      input_path <- file_info$datapath
+    } else if (!is.null(text_input) && text_input != "") {
+      # Enhanced FASTA format validation for text input
+      fasta_validation <- validate_fasta_text(text_input)
+      if (!fasta_validation$valid) {
+        showNotification(fasta_validation$message, type = "error")
+        return()
+      }
+      
+      # Create temporary file from text input
+      temp_file <- tempfile(fileext = ".fasta")
+      writeLines(strsplit(text_input, "\n")[[1]], temp_file)
+      input_path <- temp_file
+      temp_file_created <- TRUE
     }
     
     withProgress(message = 'Running Novel Isoform Discovery Pipeline...', value = 0, {
@@ -71,7 +163,7 @@ create_novel_isoform_analysis_module <- function(input, output, session) {
       tryCatch({
         # Run the enhanced pipeline with user parameters
         results <- run_novel_isoform_pipeline(
-          input_fasta_path = file_info$datapath,
+          input_fasta_path = input_path,
           min_protein_length = input$min_protein_length,
           genetic_code = input$genetic_code,
           strand_specific = input$strand_specific,
@@ -110,6 +202,15 @@ create_novel_isoform_analysis_module <- function(input, output, session) {
       }, error = function(e) {
         showNotification(paste("Pipeline execution failed:", e$message), type = "error")
         novel_pipeline_results(list(success = FALSE, error = e$message))
+      }, finally = {
+        # Clean up temporary file if created
+        if (temp_file_created && !is.null(input_path) && file.exists(input_path)) {
+          tryCatch({
+            file.remove(input_path)
+          }, error = function(e) {
+            # Silently handle cleanup errors
+          })
+        }
       })
     })
   })
@@ -527,6 +628,111 @@ create_novel_isoform_analysis_module <- function(input, output, session) {
         cat("DEBUG: ORF selection changed - transcript choices:", paste(transcript_choices, collapse = ", "), "\n")
         cat("DEBUG: Selected transcript:", selected_transcript, "\n")
       }
+    }
+  })
+  
+  # ============================================================================
+  # MISCLEAVAGE TYPE CHANGE OBSERVER 
+  # ============================================================================
+  
+  # Observer to reload data when user changes miscleavage type
+  observeEvent(input$novel_miscleavage_type, {
+    cat("🔄🔄🔄 NOVEL MISCLEAVAGE OBSERVER FIRED! 🔄🔄🔄\n")
+    cat("Input value:", input$novel_miscleavage_type, "\n")
+    
+    # Only reload if we have pipeline results already
+    results <- novel_pipeline_results()
+    cat("Pipeline results exists:", !is.null(results), "\n")
+    if (!is.null(results)) {
+      cat("Pipeline success:", results$success, "\n") 
+      cat("Work dir:", results$work_dir, "\n")
+    }
+    
+    if (!is.null(results) && results$success) {
+      
+      selected_miscleavage <- input$novel_miscleavage_type %||% "no_miss_cleavage"
+      cat("🔄 Novel Isoform: User changed miscleavage type to:", selected_miscleavage, "- reloading data...\n")
+      
+      # Determine which file to load from the work directory
+      if (selected_miscleavage == "no_miss_cleavage") {
+        file_path <- file.path(results$work_dir, "novel_transcript_nt_peptides_no_miss.rds")
+        cat("Loading no missed cleavages data from:", file_path, "\n")
+      } else {
+        file_path <- file.path(results$work_dir, "novel_transcript_nt_peptides_2miss.rds")
+        cat("Loading up to 2 missed cleavages data from:", file_path, "\n")
+      }
+      
+      cat("File exists check:", file.exists(file_path), "\n")
+      
+      # Load the selected dataframe directly from work directory
+      if (file.exists(file_path)) {
+        tryCatch({
+          cat("📂 Loading file:", file_path, "\n")
+          new_data <- readRDS(file_path)
+          cat("📊 File loaded with", nrow(new_data), "rows and", ncol(new_data), "columns\n")
+          
+          novel_isoform_data(new_data)  # Update reactive data to trigger cascade
+          cat("✅ Successfully updated novel_isoform_data reactive\n")
+          
+          # Also extract ORF information for the new data
+          orf_info <- extract_orf_information(new_data)
+          novel_orf_results(orf_info)
+          cat("✅ Successfully updated novel_orf_results reactive\n")
+          
+          # ======================================================================
+          # CRITICAL FIX: Retrigger gene merging if a gene was already loaded
+          # ======================================================================
+          current_merged_data <- novel_merged_data()
+          if (!is.null(current_merged_data) && nrow(current_merged_data) > 0) {
+            cat("🔄 RETRIGGER: Gene data exists, reloading with new miscleavage setting...\n")
+            
+            # Extract gene information from current merged data
+            # Look for Ensembl gene IDs in the merged data
+            ensembl_genes <- current_merged_data$geneID[grepl("^ENSG", current_merged_data$geneID)]
+            if (length(ensembl_genes) > 0) {
+              gene_id <- ensembl_genes[1]  # Use first Ensembl gene ID found
+              cat("🔄 RETRIGGER: Reloading gene", gene_id, "with miscleavage type:", selected_miscleavage, "\n")
+              
+              # Get current filtered novel data
+              filtered_novel <- filtered_novel_data()
+              if (!is.null(filtered_novel) && nrow(filtered_novel) > 0) {
+                
+                tryCatch({
+                  # Reload gene data with new miscleavage setting
+                  merged_data <- load_and_merge_gene_data(
+                    gene_id = gene_id,
+                    novel_data = filtered_novel,
+                    miscleavage_type = selected_miscleavage,
+                    rds_dir = "data/genes"
+                  )
+                  
+                  # Update merged data with new miscleavage setting
+                  novel_merged_data(merged_data)
+                  cat("✅ RETRIGGER: Successfully reloaded gene data with new miscleavage setting\n")
+                  
+                }, error = function(e) {
+                  cat("❌ RETRIGGER: Error reloading gene data:", e$message, "\n")
+                  # Don't show error to user - fallback to novel data only
+                })
+              }
+            }
+          }
+          
+        }, error = function(e) {
+          cat("❌ Error loading miscleavage data:", e$message, "\n")
+          showNotification(paste("Error loading miscleavage data:", e$message), type = "error")
+        })
+      } else {
+        cat("❌ Miscleavage file not found:", file_path, "\n")
+        cat("Available files in work_dir:\n")
+        if (dir.exists(results$work_dir)) {
+          available_files <- list.files(results$work_dir, pattern = "*.rds")
+          cat(paste(available_files, collapse = "\n"), "\n")
+        }
+        showNotification("Miscleavage data file not found. Please re-run the pipeline.", type = "warning")
+      }
+    } else {
+      cat("❌ No pipeline results available or pipeline not successful\n")
     }
   })
   

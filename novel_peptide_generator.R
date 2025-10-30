@@ -85,7 +85,7 @@ extract_novel_proteins <- function(fasta_file, gtf_file) {
   # Remove stop codons (*) from sequences
   protein_data[, seq := gsub("\\*$", "", seq)]
   
-  # Load GTF to get available transcripts
+  # Load GTF to check available transcripts
   cat("Loading GTF to check available transcripts...\n")
   gtf_gr <- import(gtf_file, format = "gtf")
   available_transcripts <- unique(gtf_gr$transcript_id)
@@ -107,7 +107,7 @@ extract_novel_proteins <- function(fasta_file, gtf_file) {
 }
 
 #===============================================================================
-# MAIN GENERATOR FUNCTION
+# MAIN GENERATOR FUNCTION - MODIFIED FOR DUAL MISCLEAVAGE
 #===============================================================================
 
 generate_novel_peptide_data <- function(gtf_file, fasta_file, missedCleavages = 0, minLength = 7, maxLength = 60) {
@@ -115,379 +115,396 @@ generate_novel_peptide_data <- function(gtf_file, fasta_file, missedCleavages = 
   
   # Step 1: Extract protein sequences for novel sequences
   cat("Extracting protein sequences...\n")
-  protein_seqs <- extract_novel_proteins(fasta_file, gtf_file)
+  protein_seqs_base <- extract_novel_proteins(fasta_file, gtf_file)
   
-  # Ensure no factors in protein_seqs
-  for (col in names(protein_seqs)) {
-    if (is.factor(protein_seqs[[col]])) {
-      protein_seqs[[col]] <- as.character(protein_seqs[[col]])
+  # Ensure no factors in protein_seqs_base
+  for (col in names(protein_seqs_base)) {
+    if (is.factor(protein_seqs_base[[col]])) {
+      protein_seqs_base[[col]] <- as.character(protein_seqs_base[[col]])
     }
   }
   
-  # Step 2: Process ALL enzymes to match expected output structure
-  for (enzyme in enzymes) {
-    cat("Processing enzyme:", enzyme, "\n")
-    cleaver_enzyme <- enzyme_map[[enzyme]]
+  # Helper function to process a single miscleavage setting
+  process_single_miscleavage <- function(protein_seqs_orig, missedCleavages_val, minLength, maxLength, gtf_file) {
+    # Make a copy for this miscleavage setting
+    protein_seqs <- copy(protein_seqs_orig)
     
-    # Digest proteins with the enzyme
-    protein_seqs[, paste0(enzyme, "Peps") := sapply(seq, function(x) cleaver::cleave(
-      x, enzym = cleaver_enzyme,
-      missedCleavages = missedCleavages,
-      custom = NULL, unique = TRUE
-    ))]
+    cat("\nProcessing with", missedCleavages_val, "missed cleavages...\n")
     
-    # Filter by length
-    protein_seqs[, paste0(enzyme, "Peps") := sapply(get(paste0(enzyme, "Peps")), function(x) {
-      aaNo <- sapply(x, nchar)
-      x[aaNo >= minLength & aaNo <= maxLength]
-    })]
-  }
-  
-  # Step 3: Calculate peptide positions for ALL enzymes
-  cat("Calculating peptide positions...\n")
-  
-  # Function to get peptide positions
-  get_peptide_positions <- function(txID_i, peptides) {
-    protein_seq <- protein_seqs[txID == txID_i, seq]
-    
-    if (length(protein_seq) == 0 || is.null(peptides) || length(peptides) == 0 || all(is.na(peptides))) {
-      return(NA)
+    # Step 2: Process ALL enzymes to match expected output structure
+    for (enzyme in enzymes) {
+      cat("  Processing enzyme:", enzyme, "\n")
+      cleaver_enzyme <- enzyme_map[[enzyme]]
+      
+      # Digest proteins with the enzyme
+      # Fix: Use range 0:n for missed cleavages to get all combinations up to n
+      protein_seqs[, paste0(enzyme, "Peps") := sapply(seq, function(x) cleaver::cleave(
+        x, enzym = cleaver_enzyme,
+        missedCleavages = if(missedCleavages_val == 0) 0 else 0:missedCleavages_val,
+        custom = NULL, unique = TRUE
+      ))]
+      
+      # Filter by length
+      protein_seqs[, paste0(enzyme, "Peps") := sapply(get(paste0(enzyme, "Peps")), function(x) {
+        aaNo <- sapply(x, nchar)
+        x[aaNo >= minLength & aaNo <= maxLength]
+      })]
     }
     
-    protein_seq <- as.character(protein_seq[[1]])
-    peptide_positions_list <- lapply(peptides, function(pep) {
-      match_positions <- tryCatch({
-        str_locate_all(protein_seq, fixed(pep))[[1]]
-      }, error = function(e) {
-        warning("Error locating peptide positions: ", e$message)
-        return(matrix(nrow=0, ncol=2, dimnames=list(NULL, c("start", "end"))))
+    # Step 3: Calculate peptide positions for ALL enzymes
+    cat("  Calculating peptide positions...\n")
+    
+    # Function to get peptide positions
+    get_peptide_positions <- function(txID_i, peptides) {
+      protein_seq <- protein_seqs[txID == txID_i, seq]
+      
+      if (length(protein_seq) == 0 || is.null(peptides) || length(peptides) == 0 || all(is.na(peptides))) {
+        return(NA)
+      }
+      
+      protein_seq <- as.character(protein_seq[[1]])
+      peptide_positions_list <- lapply(peptides, function(pep) {
+        match_positions <- tryCatch({
+          str_locate_all(protein_seq, fixed(pep))[[1]]
+        }, error = function(e) {
+          warning("Error locating peptide positions: ", e$message)
+          return(matrix(nrow=0, ncol=2, dimnames=list(NULL, c("start", "end"))))
+        })
+        
+        if (nrow(match_positions) == 0) {
+          return(NULL)
+        }
+        
+        data.frame(
+          peptide = pep,
+          aa_start = match_positions[, "start"],
+          aa_end = match_positions[, "end"],
+          stringsAsFactors = FALSE
+        )
       })
       
-      if (nrow(match_positions) == 0) {
+      peptide_positions_df <- do.call(rbind, peptide_positions_list)
+      
+      if (!is.null(peptide_positions_df) && nrow(peptide_positions_df) > 0) {
+        return(peptide_positions_df)
+      } else {
+        return(NA)
+      }
+    }
+    
+    # Apply get_peptide_positions to ALL enzyme peptide types
+    for (enzyme in enzymes) {
+      enzyme_pep <- paste0(enzyme, "Peps")
+      peptide_col <- paste0(enzyme_pep, "_positions")
+      
+      protein_seqs[, (peptide_col) := lapply(.I, function(i) {
+        txID_i <- txID[i]
+        peptides_i <- get(enzyme_pep)[[i]]
+        
+        if (is.null(peptides_i) || length(peptides_i) == 0 || all(is.na(peptides_i))) {
+          return(NA)
+        }
+        
+        positions_df <- tryCatch({
+          result <- get_peptide_positions(txID_i, peptides_i)
+          # Ensure no factors in the result
+          if (is.data.frame(result)) {
+            for (col in names(result)) {
+              if (is.factor(result[[col]])) {
+                result[[col]] <- as.character(result[[col]])
+              }
+            }
+          }
+          result
+        }, error = function(e) {
+          warning("Error calculating peptide positions for ", txID_i, ": ", e$message)
+          return(NA)
+        })
+        
+        return(positions_df)
+      })]
+    }
+    
+    # Step 4: Import GTF and extract CDS information
+    cat("  Importing GTF and mapping to genomic coordinates...\n")
+    gtf_gr <- import(gtf_file, format = "gtf")
+    cds_gr <- gtf_gr[gtf_gr$type == "CDS"]
+    phases <- mcols(cds_gr)$phase
+    cds_by_tx <- split(cds_gr, cds_gr$transcript_id)
+    
+    # Step 5: Functions for genomic mapping
+    
+    # Validate strand consistency
+    validate_strand_consistency <- function(cds_tx) {
+      strands <- unique(as.character(strand(cds_tx)))
+      if (length(strands) != 1) {
+        stop("Inconsistent strand information across CDS entries for the transcript.")
+      }
+      return(strands[1])
+    }
+    
+    # Retrieve and sort CDS information
+    retrieve_sorted_cds <- function(txID, cds_by_tx) {
+      cds_tx <- cds_by_tx[[txID]]
+      if (is.null(cds_tx)) {
+        warning(paste("Transcript ID", txID, "not found in CDS entries."))
         return(NULL)
       }
       
-      data.frame(
-        peptide = pep,
-        aa_start = match_positions[, "start"],
-        aa_end = match_positions[, "end"],
+      # Validate strand consistency
+      strand_tx <- validate_strand_consistency(cds_tx)
+      
+      # Sort CDS based on strand
+      if (strand_tx == "+") {
+        cds_tx <- cds_tx[order(start(cds_tx))]
+      } else {
+        cds_tx <- cds_tx[order(start(cds_tx), decreasing = TRUE)]
+      }
+      
+      return(list(cds_tx = cds_tx, strand_tx = strand_tx))
+    }
+    
+    # Calculate cumulative CDS positions
+    calculate_cumulative_cds <- function(cds_tx, phases, strand_tx) {
+      cumulative_cds <- data.frame(
+        exon_idx = integer(),
+        cds_start_nt = integer(),
+        cds_end_nt = integer(),
+        genomic_start = integer(),
+        genomic_end = integer(),
         stringsAsFactors = FALSE
       )
-    })
-    
-    peptide_positions_df <- do.call(rbind, peptide_positions_list)
-    
-    if (!is.null(peptide_positions_df) && nrow(peptide_positions_df) > 0) {
-      return(peptide_positions_df)
-    } else {
-      return(NA)
-    }
-  }
-  
-  # Apply get_peptide_positions to ALL enzyme peptide types
-  for (enzyme in enzymes) {
-    enzyme_pep <- paste0(enzyme, "Peps")
-    peptide_col <- paste0(enzyme_pep, "_positions")
-    
-    protein_seqs[, (peptide_col) := lapply(.I, function(i) {
-      txID_i <- txID[i]
-      peptides_i <- get(enzyme_pep)[[i]]
       
-      if (is.null(peptides_i) || length(peptides_i) == 0 || all(is.na(peptides_i))) {
-        return(NA)
-      }
-      
-      positions_df <- tryCatch({
-        result <- get_peptide_positions(txID_i, peptides_i)
-        # Ensure no factors in the result
-        if (is.data.frame(result)) {
-          for (col in names(result)) {
-            if (is.factor(result[[col]])) {
-              result[[col]] <- as.character(result[[col]])
-            }
-          }
+      cumulative_length <- 0
+      for (i in seq_along(cds_tx)) {
+        exon <- cds_tx[i]
+        exon_phase <- phases[i]
+        exon_length <- width(exon)
+        
+        if (i == 1) {
+          cds_start_nt <- 1 + exon_phase
+        } else {
+          cds_start_nt <- cumulative_length + 1 + exon_phase
         }
-        result
-      }, error = function(e) {
-        warning("Error calculating peptide positions for ", txID_i, ": ", e$message)
-        return(NA)
-      })
-      
-      return(positions_df)
-    })]
-  }
-  
-  # Step 4: Import GTF and extract CDS information
-  cat("Importing GTF and mapping to genomic coordinates...\n")
-  gtf_gr <- import(gtf_file, format = "gtf")
-  cds_gr <- gtf_gr[gtf_gr$type == "CDS"]
-  phases <- mcols(cds_gr)$phase
-  cds_by_tx <- split(cds_gr, cds_gr$transcript_id)
-  
-  # Step 5: Functions for genomic mapping
-  
-  # Validate strand consistency
-  validate_strand_consistency <- function(cds_tx) {
-    strands <- unique(as.character(strand(cds_tx)))
-    if (length(strands) != 1) {
-      stop("Inconsistent strand information across CDS entries for the transcript.")
-    }
-    return(strands[1])
-  }
-  
-  # Retrieve and sort CDS information
-  retrieve_sorted_cds <- function(txID, cds_by_tx) {
-    cds_tx <- cds_by_tx[[txID]]
-    if (is.null(cds_tx)) {
-      warning(paste("Transcript ID", txID, "not found in CDS entries."))
-      return(NULL)
-    }
-    
-    # Validate strand consistency
-    strand_tx <- validate_strand_consistency(cds_tx)
-    
-    # Sort CDS based on strand
-    if (strand_tx == "+") {
-      cds_tx <- cds_tx[order(start(cds_tx))]
-    } else {
-      cds_tx <- cds_tx[order(start(cds_tx), decreasing = TRUE)]
-    }
-    
-    return(list(cds_tx = cds_tx, strand_tx = strand_tx))
-  }
-  
-  # Calculate cumulative CDS positions
-  calculate_cumulative_cds <- function(cds_tx, phases, strand_tx) {
-    cumulative_cds <- data.frame(
-      exon_idx = integer(),
-      cds_start_nt = integer(),
-      cds_end_nt = integer(),
-      genomic_start = integer(),
-      genomic_end = integer(),
-      stringsAsFactors = FALSE
-    )
-    
-    cumulative_length <- 0
-    for (i in seq_along(cds_tx)) {
-      exon <- cds_tx[i]
-      exon_phase <- phases[i]
-      exon_length <- width(exon)
-      
-      if (i == 1) {
-        cds_start_nt <- 1 + exon_phase
-      } else {
-        cds_start_nt <- cumulative_length + 1 + exon_phase
+        
+        cds_end_nt <- cds_start_nt + (exon_length - exon_phase) - 1
+        
+        if (strand_tx == "+") {
+          genomic_start <- start(exon) + exon_phase
+          genomic_end <- end(exon)
+        } else {
+          genomic_start <- end(exon) - exon_phase
+          genomic_end <- start(exon)
+        }
+        
+        cumulative_cds <- rbind(cumulative_cds, data.frame(
+          exon_idx = i,
+          cds_start_nt = cds_start_nt,
+          cds_end_nt = cds_end_nt,
+          genomic_start = genomic_start,
+          genomic_end = genomic_end,
+          stringsAsFactors = FALSE
+        ))
+        
+        cumulative_length <- cds_end_nt
       }
       
-      cds_end_nt <- cds_start_nt + (exon_length - exon_phase) - 1
+      return(cumulative_cds)
+    }
+    
+    # Map CDS nucleotide to genomic position
+    map_cds_nt_to_genomic <- function(cds_cumulative, nt_pos, strand_tx) {
+      exon_row <- cds_cumulative[cds_cumulative$cds_start_nt <= nt_pos & cds_cumulative$cds_end_nt >= nt_pos, ]
+      
+      if (nrow(exon_row) == 0) {
+        return(NA)
+      }
+      
+      offset <- nt_pos - exon_row$cds_start_nt
       
       if (strand_tx == "+") {
-        genomic_start <- start(exon) + exon_phase
-        genomic_end <- end(exon)
+        genomic_pos <- exon_row$genomic_start + offset
       } else {
-        genomic_start <- end(exon) - exon_phase
-        genomic_end <- start(exon)
+        genomic_pos <- exon_row$genomic_start - offset
       }
       
-      cumulative_cds <- rbind(cumulative_cds, data.frame(
-        exon_idx = i,
-        cds_start_nt = cds_start_nt,
-        cds_end_nt = cds_end_nt,
-        genomic_start = genomic_start,
-        genomic_end = genomic_end,
-        stringsAsFactors = FALSE
-      ))
-      
-      cumulative_length <- cds_end_nt
+      return(genomic_pos)
     }
     
-    return(cumulative_cds)
-  }
-  
-  # Map CDS nucleotide to genomic position
-  map_cds_nt_to_genomic <- function(cds_cumulative, nt_pos, strand_tx) {
-    exon_row <- cds_cumulative[cds_cumulative$cds_start_nt <= nt_pos & cds_cumulative$cds_end_nt >= nt_pos, ]
-    
-    if (nrow(exon_row) == 0) {
-      return(NA)
+    # Map peptide to genomic coordinates
+    map_peptide_to_genomic <- function(peptide, cds_cumulative, strand_tx, chrom) {
+      peptide_name <- peptide$peptide
+      aa_start <- peptide$aa_start
+      aa_end <- peptide$aa_end
+      
+      cds_start_pos <- (aa_start - 1) * 3 + 1
+      cds_end_pos <- aa_end * 3
+      
+      # Find exons spanned by peptide
+      exons_spanned <- which(
+        (cds_cumulative$cds_start_nt <= cds_end_pos) &
+          (cds_cumulative$cds_end_nt >= cds_start_pos)
+      )
+      
+      if (length(exons_spanned) == 0) {
+        warning(paste("Peptide", peptide_name, "has nucleotide positions outside CDS range."))
+        return(NULL)
+      }
+      
+      peptide_gr_list <- list()
+      
+      for (exon_idx in exons_spanned) {
+        exon_info <- cds_cumulative[exon_idx, ]
+        
+        overlap_start <- max(cds_start_pos, exon_info$cds_start_nt)
+        overlap_end <- min(cds_end_pos, exon_info$cds_end_nt)
+        
+        genomic_start <- map_cds_nt_to_genomic(cds_cumulative, overlap_start, strand_tx)
+        genomic_end <- map_cds_nt_to_genomic(cds_cumulative, overlap_end, strand_tx)
+        
+        if (is.na(genomic_start) || is.na(genomic_end)) {
+          warning(paste("Peptide", peptide_name, "has mapping issues in exon", exon_idx))
+          next
+        }
+        
+        ir_start <- min(genomic_start, genomic_end)
+        ir_end <- max(genomic_start, genomic_end)
+        
+        # Create GRanges object for this peptide segment
+        partial_gr <- GRanges(
+          seqnames = chrom,
+          ranges = IRanges(start = ir_start, end = ir_end),
+          strand = strand_tx,
+          peptide = peptide_name
+        )
+        
+        peptide_gr_list[[length(peptide_gr_list) + 1]] <- partial_gr
+      }
+      
+      if (length(peptide_gr_list) == 0) {
+        return(NULL)
+      }
+      
+      peptide_gr <- do.call(c, peptide_gr_list)
+      return(peptide_gr)
     }
     
-    offset <- nt_pos - exon_row$cds_start_nt
-    
-    if (strand_tx == "+") {
-      genomic_pos <- exon_row$genomic_start + offset
-    } else {
-      genomic_pos <- exon_row$genomic_start - offset
+    # Step 6: Initialize mapped_ranges columns for ALL enzymes
+    for (enzyme in enzymes) {
+      mapped_ranges_column_name <- paste0(enzyme, "Peps_mapped_ranges")
+      protein_seqs[[mapped_ranges_column_name]] <- vector("list", nrow(protein_seqs))
     }
     
-    return(genomic_pos)
-  }
-  
-  # Map peptide to genomic coordinates
-  map_peptide_to_genomic <- function(peptide, cds_cumulative, strand_tx, chrom) {
-    peptide_name <- peptide$peptide
-    aa_start <- peptide$aa_start
-    aa_end <- peptide$aa_end
-    
-    cds_start_pos <- (aa_start - 1) * 3 + 1
-    cds_end_pos <- aa_end * 3
-    
-    # Find exons spanned by peptide
-    exons_spanned <- which(
-      (cds_cumulative$cds_start_nt <= cds_end_pos) &
-        (cds_cumulative$cds_end_nt >= cds_start_pos)
-    )
-    
-    if (length(exons_spanned) == 0) {
-      warning(paste("Peptide", peptide_name, "has nucleotide positions outside CDS range."))
-      return(NULL)
-    }
-    
-    peptide_gr_list <- list()
-    
-    for (exon_idx in exons_spanned) {
-      exon_info <- cds_cumulative[exon_idx, ]
+    # Step 7: Map peptides to genomic coordinates for ALL enzymes
+    for (entry_idx in 1:nrow(protein_seqs)) {
+      entry <- protein_seqs[entry_idx, ]
+      txID_i <- entry$txID
       
-      overlap_start <- max(cds_start_pos, exon_info$cds_start_nt)
-      overlap_end <- min(cds_end_pos, exon_info$cds_end_nt)
+      # Retrieve sorted CDS and strand information
+      cds_info <- tryCatch(
+        retrieve_sorted_cds(txID_i, cds_by_tx),
+        error = function(e) {
+          warning(paste("Skipping transcript", txID_i, "due to error:", e$message))
+          return(NULL)
+        }
+      )
       
-      genomic_start <- map_cds_nt_to_genomic(cds_cumulative, overlap_start, strand_tx)
-      genomic_end <- map_cds_nt_to_genomic(cds_cumulative, overlap_end, strand_tx)
-      
-      if (is.na(genomic_start) || is.na(genomic_end)) {
-        warning(paste("Peptide", peptide_name, "has mapping issues in exon", exon_idx))
+      if (is.null(cds_info)) {
         next
       }
       
-      ir_start <- min(genomic_start, genomic_end)
-      ir_end <- max(genomic_start, genomic_end)
+      cds_tx <- cds_info$cds_tx
+      strand_tx <- cds_info$strand_tx
+      chrom <- as.character(seqnames(cds_tx))[1]
       
-      # Create GRanges object for this peptide segment
-      partial_gr <- GRanges(
-        seqnames = chrom,
-        ranges = IRanges(start = ir_start, end = ir_end),
-        strand = strand_tx,
-        peptide = peptide_name
-      )
+      # Extract phase information for sorted CDS
+      phases_tx <- mcols(cds_tx)$phase
       
-      peptide_gr_list[[length(peptide_gr_list) + 1]] <- partial_gr
-    }
-    
-    if (length(peptide_gr_list) == 0) {
-      return(NULL)
-    }
-    
-    peptide_gr <- do.call(c, peptide_gr_list)
-    return(peptide_gr)
-  }
-  
-  # Step 6: Initialize mapped_ranges columns for ALL enzymes
-  for (enzyme in enzymes) {
-    mapped_ranges_column_name <- paste0(enzyme, "Peps_mapped_ranges")
-    protein_seqs[[mapped_ranges_column_name]] <- vector("list", nrow(protein_seqs))
-  }
-  
-  # Step 7: Map peptides to genomic coordinates for ALL enzymes
-  for (entry_idx in 1:nrow(protein_seqs)) {
-    entry <- protein_seqs[entry_idx, ]
-    txID_i <- entry$txID
-    
-    # Retrieve sorted CDS and strand information
-    cds_info <- tryCatch(
-      retrieve_sorted_cds(txID_i, cds_by_tx),
-      error = function(e) {
-        warning(paste("Skipping transcript", txID_i, "due to error:", e$message))
-        return(NULL)
-      }
-    )
-    
-    if (is.null(cds_info)) {
-      next
-    }
-    
-    cds_tx <- cds_info$cds_tx
-    strand_tx <- cds_info$strand_tx
-    chrom <- as.character(seqnames(cds_tx))[1]
-    
-    # Extract phase information for sorted CDS
-    phases_tx <- mcols(cds_tx)$phase
-    
-    # Calculate cumulative CDS positions considering phase
-    cds_cumulative <- calculate_cumulative_cds(cds_tx, phases_tx, strand_tx)
-    
-    # Loop over ALL enzymes
-    for (enzyme in enzymes) {
-      # Construct the column name for the peptide positions
-      positions_column_name <- paste0(enzyme, "Peps_positions")
+      # Calculate cumulative CDS positions considering phase
+      cds_cumulative <- calculate_cumulative_cds(cds_tx, phases_tx, strand_tx)
       
-      # Check if the peptide positions column exists and is not empty
-      if (!is.null(entry[[positions_column_name]]) && length(entry[[positions_column_name]]) > 0) {
-        # Retrieve peptide positions data frame
-        peptides_df <- as.data.frame(entry[[positions_column_name]][[1]])
+      # Loop over ALL enzymes
+      for (enzyme in enzymes) {
+        # Construct the column name for the peptide positions
+        positions_column_name <- paste0(enzyme, "Peps_positions")
         
-        if (is.data.frame(peptides_df) && nrow(peptides_df) > 0) {
-          # Initialize list to store GRanges for this enzyme
-          peptide_gr_list <- list()
+        # Check if the peptide positions column exists and is not empty
+        if (!is.null(entry[[positions_column_name]]) && length(entry[[positions_column_name]]) > 0) {
+          # Retrieve peptide positions data frame
+          peptides_df <- as.data.frame(entry[[positions_column_name]][[1]])
           
-          # Iterate through each peptide
-          for (peptide_idx in 1:nrow(peptides_df)) {
-            peptide <- as.list(peptides_df[peptide_idx, ])
+          if (is.data.frame(peptides_df) && nrow(peptides_df) > 0) {
+            # Initialize list to store GRanges for this enzyme
+            peptide_gr_list <- list()
             
-            # Map peptide to genomic ranges
-            peptide_gr <- tryCatch({
-              map_peptide_to_genomic(peptide, cds_cumulative, strand_tx, chrom)
-            }, error = function(e) {
-              warning("Error mapping peptide to genomic coordinates: ", e$message)
-              return(NULL)
-            })
-            
-            if (!is.null(peptide_gr)) {
-              # Tag each peptide GRanges with transcript ID for correct faceting
-              mcols(peptide_gr)$txID <- txID_i
-              peptide_gr_list[[length(peptide_gr_list) + 1]] <- peptide_gr
+            # Iterate through each peptide
+            for (peptide_idx in 1:nrow(peptides_df)) {
+              peptide <- as.list(peptides_df[peptide_idx, ])
+              
+              # Map peptide to genomic ranges
+              peptide_gr <- tryCatch({
+                map_peptide_to_genomic(peptide, cds_cumulative, strand_tx, chrom)
+              }, error = function(e) {
+                warning("Error mapping peptide to genomic coordinates: ", e$message)
+                return(NULL)
+              })
+              
+              if (!is.null(peptide_gr)) {
+                # Tag each peptide GRanges with transcript ID for correct faceting
+                mcols(peptide_gr)$txID <- txID_i
+                peptide_gr_list[[length(peptide_gr_list) + 1]] <- peptide_gr
+              }
             }
-          }
-          
-          # Aggregate mapped peptides for this transcript and enzyme
-          if (length(peptide_gr_list) > 0) {
-            all_peptides_genomic_gr <- do.call(c, peptide_gr_list)
-            # Store in the protein_seqs data frame
-            mapped_ranges_column_name <- paste0(enzyme, "Peps_mapped_ranges")
-            protein_seqs[[mapped_ranges_column_name]][[entry_idx]] <- all_peptides_genomic_gr
+            
+            # Aggregate mapped peptides for this transcript and enzyme
+            if (length(peptide_gr_list) > 0) {
+              all_peptides_genomic_gr <- do.call(c, peptide_gr_list)
+              # Store in the protein_seqs data frame
+              mapped_ranges_column_name <- paste0(enzyme, "Peps_mapped_ranges")
+              protein_seqs[[mapped_ranges_column_name]][[entry_idx]] <- all_peptides_genomic_gr
+            }
           }
         }
       }
     }
-  }
-  
-  # Step 8: Ensure exact column order matching ENSG*.rds structure (24 columns)
-  expected_columns <- c(
-    "proteinID", "txID", "geneID", "geneSymbol", "numAA", "seq",
-    "trpPeps", "chymoPeps", "aspnPeps", "lyscPeps", "lysnPeps", "glucPeps",
-    "trpPeps_positions", "chymoPeps_positions", "aspnPeps_positions", 
-    "lyscPeps_positions", "lysnPeps_positions", "glucPeps_positions",
-    "trpPeps_mapped_ranges", "aspnPeps_mapped_ranges", "chymoPeps_mapped_ranges",
-    "glucPeps_mapped_ranges", "lysnPeps_mapped_ranges", "lyscPeps_mapped_ranges"
-  )
-  
-  # Reorder columns to match expected structure
-  protein_seqs <- protein_seqs[, ..expected_columns]
-  
-  # Convert to data.frame (not data.table) to match expected format
-  return_data <- as.data.frame(protein_seqs)
-  
-  # Explicitly ensure all character columns stay as character
-  for (col in names(return_data)) {
-    if (is.character(return_data[[col]])) {
-      return_data[[col]] <- as.character(return_data[[col]])
+    
+    # Step 8: Ensure exact column order matching ENSG*.rds structure (24 columns)
+    expected_columns <- c(
+      "proteinID", "txID", "geneID", "geneSymbol", "numAA", "seq",
+      "trpPeps", "chymoPeps", "aspnPeps", "lyscPeps", "lysnPeps", "glucPeps",
+      "trpPeps_positions", "chymoPeps_positions", "aspnPeps_positions", 
+      "lyscPeps_positions", "lysnPeps_positions", "glucPeps_positions",
+      "trpPeps_mapped_ranges", "aspnPeps_mapped_ranges", "chymoPeps_mapped_ranges",
+      "glucPeps_mapped_ranges", "lysnPeps_mapped_ranges", "lyscPeps_mapped_ranges"
+    )
+    
+    # Reorder columns to match expected structure
+    protein_seqs <- protein_seqs[, ..expected_columns]
+    
+    # Convert to data.frame (not data.table) to match expected format
+    return_data <- as.data.frame(protein_seqs)
+    
+    # Explicitly ensure all character columns stay as character
+    for (col in names(return_data)) {
+      if (is.character(return_data[[col]])) {
+        return_data[[col]] <- as.character(return_data[[col]])
+      }
     }
+    
+    cat("  Completed processing with", missedCleavages_val, "missed cleavages:", 
+        nrow(return_data), "rows with", ncol(return_data), "columns\n")
+    
+    return(return_data)
   }
   
-  cat("Peptide data generation completed\n")
-  cat("Generated", nrow(return_data), "rows with", ncol(return_data), "columns\n")
-  cat("Column names:", paste(names(return_data), collapse = ", "), "\n")
+  # Process the requested miscleavage setting
+  cat("\n=== Processing", missedCleavages, "Missed Cleavages ===\n")
+  result_df <- process_single_miscleavage(protein_seqs_base, missedCleavages, minLength, maxLength, gtf_file)
   
-  return(return_data)
+  cat("\nPeptide data generation completed with", missedCleavages, "missed cleavages\n")
+  
+  # Return single dataframe
+  return(result_df)
 }
 
 #===============================================================================
@@ -496,16 +513,31 @@ generate_novel_peptide_data <- function(gtf_file, fasta_file, missedCleavages = 
 
 # Generate peptide data for novel sequences
 cat("=== NOVEL SEQUENCE PEPTIDE GENERATOR ===\n")
-novel_peptides <- generate_novel_peptide_data(gtf_file, fasta_file)
+# Generate both dataframes with different miscleavage settings
+novel_peptides_no_miss <- generate_novel_peptide_data(gtf_file, fasta_file, missedCleavages = 0)
+novel_peptides_2miss <- generate_novel_peptide_data(gtf_file, fasta_file, missedCleavages = 2)
 
-# Save to RDS file
-output_file <- "novel_transcript_nt_peptides.rds"
-saveRDS(novel_peptides, output_file)
-cat("Saved results to:", output_file, "\n")
+# Save both dataframes to separate RDS files
+output_file_no_miss <- "novel_transcript_nt_peptides_no_miss.rds"
+output_file_2miss <- "novel_transcript_nt_peptides_2miss.rds"
+
+saveRDS(novel_peptides_no_miss, output_file_no_miss)
+saveRDS(novel_peptides_2miss, output_file_2miss)
+
+# Also save the no-miss version as the original filename for backward compatibility
+saveRDS(novel_peptides_no_miss, "novel_transcript_nt_peptides.rds")
+
+cat("\nSaved results to:\n")
+cat("  - No missed cleavages:", output_file_no_miss, "\n")
+cat("  - Up to 2 missed cleavages:", output_file_2miss, "\n")
+cat("  - Original format (no missed cleavages): novel_transcript_nt_peptides.rds\n")
 
 # Display structure summary
 cat("\n=== OUTPUT SUMMARY ===\n")
-cat("Structure of first row:\n")
-str(novel_peptides[1,])
-cat("\nDimensions:", nrow(novel_peptides), "rows x", ncol(novel_peptides), "columns\n")
-cat("Expected 24 columns - Actual:", ncol(novel_peptides), "\n") 
+cat("No missed cleavages dataframe: ", nrow(novel_peptides_no_miss), "rows x", 
+    ncol(novel_peptides_no_miss), "columns\n")
+cat("Up to 2 missed cleavages dataframe:", nrow(novel_peptides_2miss), "rows x", 
+    ncol(novel_peptides_2miss), "columns\n")
+cat("Expected 24 columns - Actual for both:", 
+    ncol(novel_peptides_no_miss), "/", 
+    ncol(novel_peptides_2miss), "\n")

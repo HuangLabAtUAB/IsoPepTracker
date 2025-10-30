@@ -128,13 +128,13 @@ map_blast_peptide_to_transcript <- function(blast_peptide, transcript_id, gene_i
 #' @param transcript_id Transcript ID
 #' @param gene_id Gene ID (for fallback approaches)
 #' @return Character string with protein sequence or NULL
-get_protein_sequence_for_transcript <- function(transcript_id, gene_id) {
+get_protein_sequence_for_transcript <- function(transcript_id, gene_id, miscleavage_type = "no_miss_cleavage") {
   
   tryCatch({
     cat("DEBUG: Loading protein sequence for transcript", transcript_id, "in gene", gene_id, "\n")
     
     # Method 1: Load gene RDS file directly from data/genes/
-    gene_file <- paste0("data/genes/", gene_id, ".rds")
+    gene_file <- paste0("data/genes/", miscleavage_type, "/", gene_id, ".rds")
     
     if (file.exists(gene_file)) {
       cat("DEBUG: Loading gene file:", gene_file, "\n")

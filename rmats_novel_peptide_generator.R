@@ -200,7 +200,7 @@ generate_rmats_peptide_data <- function(event_coords, translation_results, phase
       tryCatch({
         cleaver::cleave(
           x, enzym = cleaver_enzyme,
-          missedCleavages = missedCleavages,
+          missedCleavages = if(missedCleavages == 0) 0 else 0:missedCleavages,
           custom = NULL, unique = TRUE
         )
       }, error = function(e) {

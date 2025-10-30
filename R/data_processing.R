@@ -77,8 +77,8 @@ load_rmats_transcript_exons <- function(rmats_gtf_file, transcript_ids) {
         suffix <- parts[length(parts)]  # "inclusion" or "exclusion"
         gene_part <- paste(parts[-length(parts)], collapse = ".")  # Everything before the suffix
         
-        # Build the quoted format that matches the GTF (rtracklayer removes outer quotes)
-        gtf_format <- paste0('"', gene_part, '".', suffix)
+        # Handle GTF format: transcript_id "GENE_ID.inclusion" becomes GENE_ID.inclusion after import
+        gtf_format <- paste0(gene_part, ".", suffix)
         
         cat("🔄 Converting rMATS transcript ID:", tx_id, "→", gtf_format, "\n")
         

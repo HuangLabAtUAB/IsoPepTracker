@@ -143,14 +143,38 @@ matrix_analysis_data <- reactive({
     all_matrix_peptides$isoform_y <- match(all_matrix_peptides$isoform, selected_isoforms)
     all_matrix_peptides$enzyme_x <- match(all_matrix_peptides$enzyme, selected_enzymes)
     
-    # Add hover text following existing patterns
-    all_matrix_peptides$hover_text <- paste0(
-      "Peptide: ", all_matrix_peptides$peptide,
-      "<br>Isoform: ", all_matrix_peptides$isoform,
-      "<br>Enzyme: ", all_matrix_peptides$enzyme_name,
-      "<br>Position: ", all_matrix_peptides$start, "-", all_matrix_peptides$end,
-      "<br>Combination: ", all_matrix_peptides$combination
-    )
+    # Add hover text with aggregated positions for junction-spanning peptides
+    if (nrow(all_matrix_peptides) > 0) {
+      # Group identical peptides within same isoform-enzyme combination
+      all_matrix_peptides$hover_text <- ""
+      
+      for (i in seq_len(nrow(all_matrix_peptides))) {
+        current_peptide <- all_matrix_peptides$peptide[i]
+        current_isoform <- all_matrix_peptides$isoform[i]
+        current_enzyme <- all_matrix_peptides$enzyme[i]
+        current_enzyme_name <- all_matrix_peptides$enzyme_name[i]
+        
+        # Find all segments of the same peptide in same isoform-enzyme combination
+        same_peptide_mask <- all_matrix_peptides$peptide == current_peptide &
+                            all_matrix_peptides$isoform == current_isoform &
+                            all_matrix_peptides$enzyme == current_enzyme
+        
+        # Get all position ranges for this peptide
+        peptide_segments <- all_matrix_peptides[same_peptide_mask, ]
+        position_ranges <- paste0(peptide_segments$start, "-", peptide_segments$end)
+        aggregated_positions <- paste(position_ranges, collapse = ", ")
+        
+        # Create hover text with aggregated positions
+        all_matrix_peptides$hover_text[i] <- paste0(
+          "Peptide: ", current_peptide,
+          "<br>Isoform: ", current_isoform,
+          "<br>Enzyme: ", current_enzyme_name,
+          "<br>Position: ", aggregated_positions
+        )
+      }
+    } else {
+      all_matrix_peptides$hover_text <- character(0)
+    }
     
     # Calculate gene boundaries from genomic coordinates (from multi_enzyme_server.R)
     if (nrow(all_matrix_peptides) > 0) {
@@ -418,8 +442,7 @@ create_overlay_plot <- function(data, use_compression = FALSE, intron_scale = NU
       mode = "lines",
       line = list(color = "rgba(204, 204, 204, 0.8)", width = 2),
       showlegend = FALSE,
-      hovertemplate = paste0("Track: ", track_label, " (", chromosome_info, ")<extra></extra>"),
-      hoverinfo = "none"
+      hovertemplate = paste0("Track: ", track_label, " (", chromosome_info, ")<extra></extra>")
     )
     
     # Add exon blocks for this isoform
@@ -494,10 +517,11 @@ create_overlay_plot <- function(data, use_compression = FALSE, intron_scale = NU
           fill = "toself",
           fillcolor = enzyme_color,
           line = list(color = "black", width = 0.5),
+          marker = list(opacity = 0),
           legendgroup = enzyme,
           name = data$enzyme_names[[enzyme]],
           showlegend = i == 1 && j == 1,  # Only show legend for first occurrence of each enzyme
-          hovertemplate = paste0(clean_hover_text(combination_peptides$hover_text[j]), "<extra></extra>"),
+          hovertemplate = paste0(combination_peptides$hover_text[j], "<extra></extra>"),
           hoverinfo = "none"
         )
       }

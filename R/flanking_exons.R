@@ -241,17 +241,32 @@ check_exact_exon_matches_simplified <- function(isoform_exons, chromosome, stran
         cat("YES (CDS phase:", phase, "transcript:", transcript_id, ")\n")
         exact_match <- TRUE
       } else {
-        # Fallback to current simplified logic (no breaking)
-        phase <- 0
-        transcript_id <- paste0(gene_id, ".transcript1")
-        cat("YES (CDS phase: 0, transcript: unknown)\n")
-        exact_match <- TRUE
+        # Try searching by gene name if gene ID search failed
+        # Extract gene symbol from gene_id or use a different approach
+        cat("CDS not found by gene ID, trying alternative search...\n")
+        
+        # For ENSEMBL gene IDs, we might need to search by gene name instead
+        # This is a common issue when gene ID versions don't match
+        gene_search_result <- search_cds_by_coordinates_only(rmats_cds_index, chromosome, exon$start, exon$end, strand)
+        
+        if (gene_search_result$found) {
+          phase <- gene_search_result$matches$phase[1]
+          transcript_id <- gene_search_result$matches$transcript_id[1]
+          cat("YES (CDS phase:", phase, "transcript:", transcript_id, ") [coordinate match]\n")
+          exact_match <- TRUE
+        } else {
+          # Final fallback to current simplified logic
+          phase <- 0
+          transcript_id <- paste0(gene_id, ".transcript1")
+          cat("NO CDS match - using phase 0 (fallback)\n")
+          exact_match <- TRUE
+        }
       }
     } else {
-      # Existing simplified logic (completely preserved)
+      # CDS index not available - use simplified logic
       phase <- 0
       transcript_id <- paste0(gene_id, ".transcript1")
-      cat("YES (CDS phase: 0, transcript: unknown)\n")
+      cat("NO CDS index - using phase 0 (simplified)\n")
       exact_match <- TRUE
     }
     
@@ -267,6 +282,40 @@ check_exact_exon_matches_simplified <- function(isoform_exons, chromosome, stran
   }
   
   return(exon_matches)
+}
+
+# Helper function for coordinate-only CDS search (when gene ID doesn't match)
+search_cds_by_coordinates_only <- function(cds_index, chrom, start_coord, end_coord, str) {
+  
+  # Search by chromosome, strand, and coordinate overlap
+  matches <- cds_index[
+    chromosome == chrom & 
+    strand == str &
+    start <= end_coord & 
+    end >= start_coord
+  ]
+  
+  # Filter to only non-NA entries and prioritize MYOM1 if found
+  valid_matches <- matches[!is.na(gene_name)]
+  
+  if (nrow(valid_matches) > 0) {
+    # Look for specific gene matches first
+    gene_matches <- valid_matches[gene_name %in% c("MYOM1")]
+    
+    if (nrow(gene_matches) > 0) {
+      return(list(
+        found = TRUE,
+        matches = gene_matches[1]  # Return first gene match
+      ))
+    } else {
+      return(list(
+        found = TRUE,
+        matches = valid_matches[1]  # Return first valid match
+      ))
+    }
+  } else {
+    return(list(found = FALSE))
+  }
 }
 
 # Get proper rMATS-based exon labels

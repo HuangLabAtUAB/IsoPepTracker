@@ -79,8 +79,8 @@ create_peptide_search_module <- function(input, output, session) {
     
     withProgress(message = 'Searching peptides with BLASTP...', {
       tryCatch({
-        # Get BLAST parameters from input
-        evalue_threshold <- if (!is.null(input$peptide_search_evalue)) input$peptide_search_evalue else 10
+        # Get BLAST parameters from input (higher default E-value for short peptide sensitivity)
+        evalue_threshold <- if (!is.null(input$peptide_search_evalue)) input$peptide_search_evalue else 20000
         identity_threshold <- if (!is.null(input$peptide_search_identity)) input$peptide_search_identity else 70
         max_targets <- if (!is.null(input$peptide_search_max_targets)) input$peptide_search_max_targets else 500
         
@@ -288,7 +288,7 @@ test_peptide_search_module <- function() {
   # Test 2: Parameter validation
   parameter_test <- tryCatch({
     # Test default parameter assignment
-    evalue_threshold <- 10  # default
+    evalue_threshold <- 20000  # default for short peptide sensitivity
     identity_threshold <- 70  # default
     max_targets <- 500  # default
     

@@ -12,7 +12,8 @@ create_novel_isoform_dataframe <- function(work_dir,
                                          min_protein_length = 30,
                                          genetic_code = 1,
                                          enable_blast = TRUE,
-                                         blast_threshold = 70) {
+                                         blast_threshold = 70,
+                                         missedCleavages = 0) {
   
   cat("DEBUG: Creating enhanced novel isoform dataframe from:", work_dir, "\n")
   
@@ -114,7 +115,8 @@ create_novel_isoform_dataframe <- function(work_dir,
       peptides <- tryCatch({
         cleaver_enzyme <- enzyme_map[[enzyme]]
         cat("DEBUG: Using cleaver enzyme:", cleaver_enzyme, "for protein", i, "\n")
-        result <- cleaver::cleave(protein_seq, cleaver_enzyme)[[1]]
+        result <- cleaver::cleave(protein_seq, cleaver_enzyme, 
+                                 missedCleavages = if(missedCleavages == 0) 0 else 0:missedCleavages)[[1]]
         cat("DEBUG: Generated", length(result), "peptides for protein", i, "\n")
         result
       }, error = function(e) {

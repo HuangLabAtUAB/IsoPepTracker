@@ -10,7 +10,7 @@
 #' Executes BLASTP search against the gencode protein database
 #' 
 #' @param peptide_query Peptide sequence to search
-#' @param evalue E-value threshold for BLAST hits (default: 10)
+#' @param evalue E-value threshold for BLAST hits (default: 20000 for short peptide sensitivity)
 #' @param max_target_seqs Maximum number of target sequences to return (default: 500)
 #' @param identity_threshold Minimum identity percentage (default: 30)
 #' @param progress_callback Optional progress callback function
@@ -73,7 +73,7 @@ run_blastp_peptide_search <- function(peptide_query,
     }
     
     # Path to BLAST binary and database - using absolute paths like Novel tab
-    blastp_path <- "/Users/Mahmuda/opt/anaconda3/envs/module3_tools/bin/blastp"
+    blastp_path <- "/usr/bin/blastp"
     
     # Get absolute path to database (same pattern as Novel tab's reference handling)
     app_dir <- getwd()
@@ -119,24 +119,26 @@ run_blastp_peptide_search <- function(peptide_query,
       ))
     }
     
-    # Build BLASTP command with ultra-permissive parameters for testing
+    # Build BLASTP command optimized for short peptide sequences (≥6 AA)
     blastp_args <- c(
       "-query", query_file,
       "-db", db_path,
       "-out", output_file,
       "-outfmt", "6",
-      "-evalue", "10",  # Very permissive E-value
+      "-evalue", as.character(evalue),  # Use user-provided E-value threshold
       "-max_target_seqs", as.character(max_target_seqs),
-      "-word_size", "2",  # Small word size for short peptides
-      "-threshold", "11",  # Lower threshold for better sensitivity
-      "-task", "blastp-short",  # Optimized for short sequences
+      "-task", "blastp-short",  # Optimized for sequences <30 AA
+      "-matrix", "PAM30",  # Better scoring matrix for short sequences
       "-comp_based_stats", "0",  # Disable composition-based statistics
       "-soft_masking", "false"  # Disable soft masking
+      # Note: word_size=2 and threshold=16 are blastp-short defaults, don't override
     )
     
     # Debug: show full command
     full_command <- paste(blastp_path, paste(blastp_args, collapse = " "))
     cat("DEBUG: Full BLASTP command:", full_command, "\n")
+    cat("DEBUG: BLAST output format:", blastp_args[which(blastp_args == "-outfmt") + 1], "\n")
+    cat("DEBUG: Query coverage parameter:", if("-qcov_hsp_perc" %in% blastp_args) paste("-qcov_hsp_perc", blastp_args[which(blastp_args == "-qcov_hsp_perc") + 1]) else "NOT FOUND", "\n")
     
     # Execute BLASTP following Novel tab pattern
     blast_result <- system2(
@@ -223,20 +225,34 @@ run_blastp_peptide_search <- function(peptide_query,
     # Debug: Show raw BLAST output before parsing
     if (file.exists(output_file) && file.size(output_file) > 0) {
       blast_raw_lines <- readLines(output_file)
-      cat("DEBUG: Raw BLAST output (first 10 lines):\n")
-      cat(paste(head(blast_raw_lines, 10), collapse = "\n"), "\n")
+      cat("DEBUG: Raw BLAST output (first 3 lines):\n")
+      cat(paste(head(blast_raw_lines, 3), collapse = "\n"), "\n")
       cat("DEBUG: Total raw BLAST lines:", length(blast_raw_lines), "\n")
+      if (length(blast_raw_lines) > 0) {
+        # Check number of columns in first line
+        first_line_parts <- strsplit(blast_raw_lines[1], "\t")[[1]]
+        cat("DEBUG: Number of columns in first result:", length(first_line_parts), "\n")
+        cat("DEBUG: Last column (should be query coverage):", if(length(first_line_parts) >= 13) first_line_parts[13] else "MISSING", "\n")
+      }
     }
     
     # Parse BLAST output
     blast_results <- parse_blastp_output(output_file, identity_threshold, peptide_clean)
     
+    # Debug: Check if query_coverage made it through parsing
+    cat("DEBUG: After parsing - columns in blast_results:", paste(names(blast_results), collapse = ", "), "\n")
+    cat("DEBUG: Query coverage present after parsing:", "query_coverage" %in% names(blast_results), "\n")
+    
     if (!is.null(progress_callback)) {
       progress_callback("Mapping to gene information...", 0.9)
     }
     
-    # Map protein IDs to gene information
-    enhanced_results <- map_proteins_to_genes(blast_results)
+    # Map protein IDs to gene information and verify exact peptide presence
+    enhanced_results <- map_proteins_to_genes(blast_results, peptide_clean)
+    
+    # Debug: Check if query_coverage survived gene mapping
+    cat("DEBUG: After gene mapping - columns in enhanced_results:", paste(names(enhanced_results), collapse = ", "), "\n")
+    cat("DEBUG: Query coverage present after gene mapping:", "query_coverage" %in% names(enhanced_results), "\n")
     
     if (!is.null(progress_callback)) {
       progress_callback("Search completed!", 1.0)
@@ -373,13 +389,15 @@ parse_blastp_output <- function(output_file, identity_threshold = 70, query_pept
   return(results_df)
 }
 
-#' Map Protein IDs to Gene Information
+#' Map Protein IDs to Gene Information and Verify Exact Peptide Presence
 #' 
-#' Maps BLAST protein hits to gene and transcript information
+#' Maps BLAST protein hits to gene and transcript information and verifies
+#' that the query peptide exists exactly within the full protein sequences
 #' 
 #' @param blast_results Data frame with BLAST results
-#' @return Enhanced data frame with gene information
-map_proteins_to_genes <- function(blast_results) {
+#' @param query_peptide Original query peptide sequence for exact matching
+#' @return Enhanced data frame with gene information and exact_match_found column
+map_proteins_to_genes <- function(blast_results, query_peptide = NULL) {
   
   if (nrow(blast_results) == 0) {
     return(data.frame(
@@ -393,6 +411,7 @@ map_proteins_to_genes <- function(blast_results) {
       alignment_length = numeric(0),
       evalue = numeric(0),
       bit_score = numeric(0),
+      exact_match_found = logical(0),
       stringsAsFactors = FALSE
     ))
   }
@@ -436,10 +455,49 @@ map_proteins_to_genes <- function(blast_results) {
   enhanced_results <- enhanced_results[!is.na(enhanced_results$gene_id) & 
                                      enhanced_results$gene_id != "Unknown", ]
   
+  # Add exact peptide sequence verification
+  enhanced_results$exact_match_found <- FALSE
+  
+  if (!is.null(query_peptide) && nchar(query_peptide) > 0 && nrow(enhanced_results) > 0) {
+    cat("DEBUG: Performing exact sequence verification for peptide:", query_peptide, "\n")
+    
+    # Source the blast genomic mapper for get_protein_sequence_for_transcript function
+    if (file.exists("R/blast_genomic_mapper.R")) {
+      source("R/blast_genomic_mapper.R")
+    }
+    
+    for (i in 1:nrow(enhanced_results)) {
+      transcript_id <- enhanced_results$transcript_id[i]
+      gene_id <- enhanced_results$gene_id[i]
+      
+      if (!is.na(transcript_id) && !is.na(gene_id)) {
+        tryCatch({
+          # Get full protein sequence for this transcript
+          protein_sequence <- get_protein_sequence_for_transcript(transcript_id, gene_id)
+          
+          if (!is.null(protein_sequence) && nchar(protein_sequence) > 0) {
+            # Check if query peptide exists exactly in the protein sequence
+            exact_match <- grepl(query_peptide, protein_sequence, fixed = TRUE)
+            enhanced_results$exact_match_found[i] <- exact_match
+            
+            cat("DEBUG: Transcript", transcript_id, "exact match:", exact_match, "\n")
+          } else {
+            cat("DEBUG: Could not retrieve protein sequence for transcript", transcript_id, "\n")
+          }
+        }, error = function(e) {
+          cat("ERROR: Failed to verify sequence for transcript", transcript_id, ":", e$message, "\n")
+          enhanced_results$exact_match_found[i] <- FALSE
+        })
+      }
+    }
+    
+    cat("DEBUG: Exact matches found:", sum(enhanced_results$exact_match_found), "out of", nrow(enhanced_results), "BLAST hits\n")
+  }
+  
   # Select and reorder columns for final output
   final_results <- enhanced_results[, c(
     "query_id", "subject_id", "gene_id", "gene_symbol", "transcript_id", "protein_id",
-    "identity_percent", "alignment_length", "evalue", "bit_score"
+    "identity_percent", "alignment_length", "evalue", "bit_score", "exact_match_found"
   )]
   
   return(final_results)
@@ -552,6 +610,7 @@ cross_reference_blast_with_peptide_databases <- function(blast_results, peptide_
       alignment_length = numeric(0),
       evalue = numeric(0),
       bit_score = numeric(0),
+      query_coverage = numeric(0),
       database_source = character(0),
       peptide_context = character(0),
       stringsAsFactors = FALSE

@@ -7,6 +7,9 @@
 # First source coordinate_utils.R, then modules that depend on it
 source("rmats_peptide/utils/coordinate_utils.R")
 
+# Load rMATS comprehensive analysis functions
+source("R/rmats_comprehensive_analysis.R")
+
 # Source the CDS index module first as other modules depend on it
 source("rmats_peptide/modules/create_cds_index.R")
 
@@ -42,6 +45,17 @@ rmats_pipeline_results <- reactiveVal(NULL)
 rmats_isoform_data <- reactiveVal(NULL)
 rmats_merged_data <- reactiveVal(NULL)
 rmats_multi_isoform_data <- reactiveVal(NULL)
+
+# Initialize tracking variables to prevent undefined behavior
+if (!exists("last_loaded_rmats_file")) {
+  assign("last_loaded_rmats_file", NULL, envir = .GlobalEnv)
+}
+if (!exists("last_rmats_miscleavage")) {
+  assign("last_rmats_miscleavage", NULL, envir = .GlobalEnv)
+}
+# Flag to prevent Load Gene Data observer from running during miscleavage change
+rmats_miscleavage_change_in_progress <- reactiveVal(FALSE)
+cat("💾 INIT: Initialized tracking variables and coordination flags\n")
 
 # Load CDS index for proper CDS operations
 if (!exists("rmats_cds_index")) {
@@ -983,8 +997,15 @@ observeEvent(input$rmats_analyze_selected, {
     
     incProgress(0.1, detail = "Initializing analysis...")
     
-    # Run comprehensive analysis using exact rmats_peptide logic
-    analysis_results <- analyze_rmats_event_comprehensive(selected_event, event_type)
+    # Run STREAMLINED analysis (eliminates redundant CDS searches)
+    missedCleavages <- ifelse(input$rmats_miscleavage_type == "upto_two_misscleavage", 2, 0)
+    cat("🚀 Using STREAMLINED pipeline to eliminate CDS search corruption\n")
+    analysis_results <- analyze_rmats_event_streamlined(selected_event, event_type, missedCleavages)
+    
+    # Store complete analysis results for UI display
+    if (analysis_results$success) {
+      rmats_pipeline_results(analysis_results)
+    }
     
     incProgress(0.9, detail = "Finalizing results...")
     
@@ -3621,25 +3642,51 @@ observeEvent(input$run_rmats_comprehensive_analysis, {
   
   withProgress(message = 'Running comprehensive rMATS analysis...', value = 0, {
     tryCatch({
-      # Run comprehensive analysis using existing function
-      analysis_results <- analyze_rmats_event_comprehensive(selected_event, event_type)
+      # Run STREAMLINED analysis (eliminates redundant CDS searches)
+      missedCleavages <- ifelse(input$rmats_miscleavage_type == "upto_two_misscleavage", 2, 0)
+      cat("🚀 Using STREAMLINED pipeline to eliminate CDS search corruption\n")
+      analysis_results <- analyze_rmats_event_streamlined(selected_event, event_type, missedCleavages)
       
       if (analysis_results$success) {
-        # Store pipeline results for visualization system
-        rmats_pipeline_results(analysis_results$pipeline_results)
+        # Store complete analysis results for UI display
+        rmats_pipeline_results(analysis_results)
         
         # Make pipeline results available globally for visualization system (like Novel Isoform)
-        assign("rmats_pipeline_results", function() analysis_results$pipeline_results, envir = .GlobalEnv)
+        # Handle both flattened structure (streamlined) and nested structure (old analysis)
+        if (!is.null(analysis_results$pipeline_results)) {
+          # Old nested structure
+          assign("rmats_pipeline_results", function() analysis_results$pipeline_results, envir = .GlobalEnv)
+        } else {
+          # New flattened structure - return analysis_results directly
+          assign("rmats_pipeline_results", function() analysis_results, envir = .GlobalEnv)
+        }
         
         # Store analysis results in pipeline state
         rmats_pipeline_state$analysis_results <- analysis_results
         rmats_pipeline_state$pipeline_completed <- TRUE
         
-        # Load rMATS isoform data from analysis results (no hardcoded files)
-        cat("DEBUG: Loading 24-column peptide file from analysis results:", analysis_results$pipeline_results$dataframe_file, "\n")
-        if (!is.null(analysis_results$pipeline_results$dataframe_file) && 
-            file.exists(analysis_results$pipeline_results$dataframe_file)) {
-          rmats_data_24col <- readRDS(analysis_results$pipeline_results$dataframe_file)
+        # Load rMATS isoform data from analysis results based on miscleavage selection
+        # Choose the appropriate dataframe based on user's miscleavage selection
+        selected_miscleavage <- input$rmats_miscleavage_type %||% "no_miss_cleavage"
+        
+        if (selected_miscleavage == "no_miss_cleavage") {
+          # Try flattened structure first (streamlined analysis), then nested structure (old analysis)
+          dataframe_to_load <- analysis_results$dataframe_file_no_miss %||%
+                               analysis_results$pipeline_results$dataframe_file_no_miss %||% 
+                               analysis_results$dataframe_file %||%
+                               analysis_results$pipeline_results$dataframe_file  # Fallback for backward compatibility
+          cat("DEBUG: Loading no missed cleavages peptide file from:", dataframe_to_load, "\n")
+        } else {
+          # Try flattened structure first (streamlined analysis), then nested structure (old analysis)
+          dataframe_to_load <- analysis_results$dataframe_file_2miss %||%
+                               analysis_results$pipeline_results$dataframe_file_2miss %||%
+                               analysis_results$dataframe_file %||%
+                               analysis_results$pipeline_results$dataframe_file  # Fallback for backward compatibility
+          cat("DEBUG: Loading up to 2 missed cleavages peptide file from:", dataframe_to_load, "\n")
+        }
+        
+        if (!is.null(dataframe_to_load) && file.exists(dataframe_to_load)) {
+          rmats_data_24col <- readRDS(dataframe_to_load)
         } else {
           showNotification("No rMATS data file found in analysis results", type = "error")
           return()
@@ -3745,10 +3792,112 @@ observeEvent(input$run_rmats_comprehensive_analysis, {
   })
 })
 
+#===============================================================================
+# MISCLEAVAGE TYPE CHANGE OBSERVER 
+#===============================================================================
+
+# Observer to reload data when user changes miscleavage type
+observeEvent(input$rmats_miscleavage_type, {
+  # Only reload if we have analysis results already
+  if (!is.null(rmats_pipeline_state$analysis_results) && 
+      rmats_pipeline_state$analysis_results$success) {
+    
+    # Set flag to prevent Load Gene Data observer from interfering
+    rmats_miscleavage_change_in_progress(TRUE)
+    
+    analysis_results <- rmats_pipeline_state$analysis_results
+    selected_miscleavage <- input$rmats_miscleavage_type %||% "no_miss_cleavage"
+    
+    cat("🔄 MISCLEAVAGE OBSERVER: User changed miscleavage type to:", selected_miscleavage, "- reloading data...\n")
+    
+    # Choose the appropriate dataframe based on user's selection
+    # Handle both flattened structure (streamlined) and nested structure (old analysis)
+    if (selected_miscleavage == "no_miss_cleavage") {
+      dataframe_to_load <- analysis_results$dataframe_file_no_miss %||%
+                           analysis_results$pipeline_results$dataframe_file_no_miss %||% 
+                           analysis_results$dataframe_file %||%
+                           analysis_results$pipeline_results$dataframe_file
+      cat("Loading no missed cleavages data from:", dataframe_to_load, "\n")
+    } else {
+      dataframe_to_load <- analysis_results$dataframe_file_2miss %||%
+                           analysis_results$pipeline_results$dataframe_file_2miss %||%
+                           analysis_results$dataframe_file %||%
+                           analysis_results$pipeline_results$dataframe_file
+      cat("Loading up to 2 missed cleavages data from:", dataframe_to_load, "\n")
+    }
+    
+    # Load the selected dataframe
+    if (!is.null(dataframe_to_load) && file.exists(dataframe_to_load)) {
+      rmats_data_24col <- readRDS(dataframe_to_load)
+      
+      # Update rmats_isoform_data with the correct miscleavage data (CRITICAL FIX!)
+      rmats_isoform_data(rmats_data_24col)
+      
+      # Extract gene ID for merging
+      gene_id <- extract_gene_id_from_rmats_data(rmats_data_24col)
+      
+      if (!is.null(gene_id)) {
+        cat("🔄 Merging with existing gene data for gene:", gene_id, "\n")
+        
+        # Use same merge logic as in comprehensive analysis
+        tryCatch({
+          merged_data <- load_and_merge_gene_data(
+            gene_id = gene_id,
+            novel_data = rmats_data_24col,
+            miscleavage_type = input$rmats_miscleavage_type,
+            rds_dir = "data/genes"
+          )
+          
+          # Update the merged data 
+          rmats_merged_data(merged_data)
+          
+          cat("✅ MISCLEAVAGE OBSERVER: Successfully reloaded data with", selected_miscleavage, "setting\n")
+          cat("✅ MISCLEAVAGE OBSERVER: Updated merged data:", nrow(merged_data), "rows,", ncol(merged_data), "columns\n")
+          cat("🔍 MISCLEAVAGE OBSERVER: Transcript IDs:", paste(head(unique(merged_data$txID), 10), collapse = ", "), "\n")
+          cat("🔍 MISCLEAVAGE OBSERVER: rMATS transcripts:", sum(grepl("inclusion|exclusion", unique(merged_data$txID))), "\n")
+          cat("🔍 MISCLEAVAGE OBSERVER: Canonical transcripts:", sum(!grepl("inclusion|exclusion", unique(merged_data$txID))), "\n")
+          
+          showNotification(
+            paste("✅ Data reloaded with", selected_miscleavage, "setting"), 
+            type = "message", duration = 3
+          )
+          
+          # Clear flag to allow Load Gene Data observer to run again
+          rmats_miscleavage_change_in_progress(FALSE)
+          
+        }, error = function(e) {
+          cat("Warning: Could not merge with existing gene data:", e$message, "\n")
+          # Fallback to rMATS data only
+          rmats_merged_data(rmats_data_24col)
+          showNotification(
+            paste("✅ Data reloaded with", selected_miscleavage, "setting (rMATS data only)"), 
+            type = "message", duration = 3
+          )
+          # Clear flag to allow Load Gene Data observer to run again
+          rmats_miscleavage_change_in_progress(FALSE)
+        })
+      } else {
+        # No gene ID found, use rMATS data only
+        rmats_merged_data(rmats_data_24col)
+        showNotification(
+          paste("✅ Data reloaded with", selected_miscleavage, "setting"), 
+          type = "message", duration = 3
+        )
+        # Clear flag to allow Load Gene Data observer to run again
+        rmats_miscleavage_change_in_progress(FALSE)
+      }
+    } else {
+      showNotification("❌ Could not find data file for selected miscleavage type", type = "error")
+      # Clear flag even on error
+      rmats_miscleavage_change_in_progress(FALSE)
+    }
+  }
+}, ignoreInit = TRUE)  # Don't trigger on initial load
+
 # Output to control conditional panels for rMATS visualization
 output$rmats_comprehensive_completed <- reactive({
   results <- rmats_pipeline_results()
-  return(!is.null(results) && results$success)
+  return(!is.null(results) && !is.null(results$success) && isTRUE(results$success))
 })
 outputOptions(output, "rmats_comprehensive_completed", suspendWhenHidden = FALSE)
 
@@ -3759,13 +3908,18 @@ output$rmats_comprehensive_status <- renderText({
     return("Analysis not started - select an rMATS event from the table above")
   }
   
-  if (results$success) {
+  if (!is.null(results$success) && isTRUE(results$success)) {
+    gene_id <- if (!is.null(results$event_info) && !is.null(results$event_info$gene_id)) results$event_info$gene_id else "Unknown"
+    output_dir <- if (!is.null(results$output_dir)) results$output_dir else "Unknown"
+    timestamp <- if (!is.null(results$timestamp)) results$timestamp else "Unknown"
+    
     paste("✅ Comprehensive analysis completed successfully!\n",
-          "Generated inclusion and exclusion isoforms for", results$gene_id, "\n",
-          "Analysis ID:", results$analysis_id, "\n",
-          "Files created at:", results$output_dir)
+          "Generated inclusion and exclusion isoforms for", gene_id, "\n",
+          "Analysis ID:", timestamp, "\n",
+          "Files created at:", output_dir)
   } else {
-    paste("❌ Analysis failed:", results$error)
+    error_msg <- if (!is.null(results$error)) results$error else "Unknown error"
+    paste("❌ Analysis failed:", error_msg)
   }
 })
 
@@ -5022,15 +5176,30 @@ rmats_multi_isoform_highlighted_data <- reactive({
   # Return the data with specificity already calculated
   all_peptides_df <- base_data$all_peptides
   
-  # Update hover text with specificity
-  all_peptides_df$hover_text <- paste0(
-    "Peptide: ", all_peptides_df$peptide,
-    "<br>Position: ", all_peptides_df$start, "-", all_peptides_df$end,
-    "<br>Transcript: ", all_peptides_df$transcript,
-    "<br>Specificity: ", all_peptides_df$specificity_category,
-    "<br>Enzyme: ", input$rmats_protease,
-    "<br>Miscleavage: ", input$rmats_miscleavage_type
-  )
+  # Transcript-specific hover text (only current transcript)
+  all_peptides_df$hover_text <- sapply(1:nrow(all_peptides_df), function(i) {
+    current_peptide <- all_peptides_df$peptide[i]
+    current_row <- all_peptides_df[i, ]
+    current_transcript <- current_row$transcript
+    
+    # Find occurrences of this peptide ONLY within the current transcript
+    matching_peptides <- all_peptides_df[all_peptides_df$peptide == current_peptide & 
+                                        all_peptides_df$transcript == current_transcript, ]
+    
+    # Create position summary - only positions from current transcript
+    all_positions <- paste0(matching_peptides$start, "-", matching_peptides$end)
+    unique_positions <- unique(all_positions)
+    position_text <- paste0("<br>Position: ", paste(unique_positions, collapse = ", "))
+    
+    # Construct complete hover text
+    paste0(
+      "Peptide: ", current_peptide,
+      position_text,
+      "<br>Current Transcript: ", current_transcript,
+      "<br>Specificity: ", current_row$specificity_category,
+      "<br>Enzyme: ", input$rmats_protease
+    )
+  })
   
   return(list(
     all_peptides = all_peptides_df,
@@ -5086,20 +5255,38 @@ output$rmats_comparative_plot <- renderPlotly({
     
     # Load rMATS GTF data for rMATS transcripts (if available)
     rmats_results <- rmats_pipeline_results()
+    cat("🔍 DEBUG: rMATS pipeline results check:\n")
+    cat("  - rmats_results is null:", is.null(rmats_results), "\n")
+    if (!is.null(rmats_results)) {
+      cat("  - rmats_results$success:", rmats_results$success, "\n")
+      cat("  - rmats_results$gtf_file:", rmats_results$gtf_file, "\n")
+      cat("  - GTF file exists:", file.exists(rmats_results$gtf_file), "\n")
+    }
+    cat("  - rmats_transcripts:", paste(rmats_transcripts, collapse = ", "), "\n")
+    cat("  - rmats_transcripts length:", length(rmats_transcripts), "\n")
+    
     if (!is.null(rmats_results) && rmats_results$success && !is.null(rmats_results$gtf_file) && 
         file.exists(rmats_results$gtf_file) && length(rmats_transcripts) > 0) {
       
       rmats_gtf_file <- rmats_results$gtf_file
-      cat("Loading rMATS GTF for transcripts:", paste(rmats_transcripts, collapse = ", "), "\n")
+      cat("🎯 ATTEMPTING TO LOAD rMATS GTF:", rmats_gtf_file, "\n")
+      cat("🎯 LOOKING FOR TRANSCRIPTS:", paste(rmats_transcripts, collapse = ", "), "\n")
       rmats_exons_result <- load_rmats_transcript_exons(rmats_gtf_file, rmats_transcripts)
+      
+      cat("🔍 rMATS EXONS RESULT:\n")
+      cat("  - Success:", rmats_exons_result$success, "\n")
+      cat("  - Message:", rmats_exons_result$message, "\n")
+      cat("  - Exons found:", length(rmats_exons_result$exons), "\n")
+      cat("  - CDS found:", length(rmats_exons_result$cds), "\n")
       
       if (rmats_exons_result$success && length(rmats_exons_result$exons) > 0) {
         # Add rMATS exons and CDS to combined data
         exons_by_transcript <- c(exons_by_transcript, rmats_exons_result$exons)
         cds_by_transcript <- c(cds_by_transcript, rmats_exons_result$cds)
-        cat("Loaded", length(rmats_exons_result$exons), "rMATS transcript exon sets\n")
+        cat("✅ SUCCESS: Loaded", length(rmats_exons_result$exons), "rMATS transcript exon sets\n")
+        cat("✅ SUCCESS: Loaded", length(rmats_exons_result$cds), "rMATS transcript CDS sets\n")
       } else {
-        cat("Failed to load rMATS exons:", rmats_exons_result$message, "\n")
+        cat("❌ FAILED: rMATS exons loading failed:", rmats_exons_result$message, "\n")
       }
     } else {
       if (length(rmats_transcripts) > 0) {
@@ -5187,12 +5374,19 @@ output$rmats_comparative_plot <- renderPlotly({
     }
     
     # Debug: show final combined exon/CDS data
-    cat("=== GTF LOADING DEBUG ===\n")
+    cat("=== FINAL GTF LOADING SUMMARY ===\n")
     cat("All transcripts in visualization:", paste(all_transcripts, collapse = ", "), "\n")
     cat("rMATS transcripts:", paste(rmats_transcripts, collapse = ", "), "\n")
     cat("Reference transcripts:", paste(reference_transcripts, collapse = ", "), "\n")
     cat("Total exon sets loaded:", length(exons_by_transcript), "\n")
     cat("Total CDS sets loaded:", length(cds_by_transcript), "\n")
+    cat("Exon set names:", paste(names(exons_by_transcript), collapse = ", "), "\n")
+    cat("CDS set names:", paste(names(cds_by_transcript), collapse = ", "), "\n")
+    if (length(exons_by_transcript) > 0) {
+      cat("🎯 EXON STRUCTURE AVAILABLE - Should show in visualization!\n")
+    } else {
+      cat("❌ NO EXON STRUCTURE - This is why visualization shows only peptides!\n")
+    }
     cat("Exon transcript IDs:", paste(names(exons_by_transcript), collapse = ", "), "\n")
     cat("CDS transcript IDs:", paste(names(cds_by_transcript), collapse = ", "), "\n")
     cat("========================\n")
@@ -5649,12 +5843,12 @@ load_rmats_transcript_exons <- function(rmats_gtf_file, transcript_ids) {
         cat("  Gene part:", gene_part, "\n")
         cat("  Suffix:", suffix, "\n")
         
-        # Try multiple possible GTF formats
+        # Try multiple possible GTF formats, prioritizing correct format
         possible_formats <- c(
-          paste0('"', gene_part, '".', suffix),  # "ENSG123".inclusion
-          paste0(gene_part, '.', suffix),        # ENSG123.inclusion
-          paste0('"', gene_part, '.', suffix, '"'), # "ENSG123.inclusion"
-          paste0(gene_part, '"', suffix)          # ENSG123"inclusion
+          paste0('"', gene_part, '.', suffix, '"'), # "ENSG123.inclusion" (CORRECT FORMAT - prioritized)
+          paste0('"', gene_part, '".', suffix),  # "ENSG123".inclusion (BROKEN FORMAT - backup)
+          paste0(gene_part, '.', suffix),        # ENSG123.inclusion (DIRECT)
+          paste0(gene_part, '"', suffix)          # ENSG123"inclusion (FALLBACK)
         )
         
         cat("  Testing possible GTF formats:\n")
@@ -5790,26 +5984,40 @@ get_gene_peptide_data <- function(gene_id) {
 
 # Handler for "Load Gene Data" button (populates comparative analysis selections)
 observeEvent(input$load_rmats_gene, {
-  req(rmats_pipeline_state$comprehensive_analysis_results$success)
+  req(rmats_pipeline_state$analysis_results$success)
+  
+  # Don't run if miscleavage change is in progress to prevent conflicts
+  if (rmats_miscleavage_change_in_progress()) {
+    cat("⚠️ LOAD GENE DATA: Skipping due to miscleavage change in progress\n")
+    return()
+  }
   
   withProgress(message = 'Loading rMATS gene data for comparative analysis...', value = 0, {
     tryCatch({
       incProgress(0.2, detail = "Extracting rMATS data...")
       
       # Get results from comprehensive analysis
-      analysis_results <- rmats_pipeline_state$comprehensive_analysis_results
-      gene_id <- analysis_results$gene_id
-      gene_symbol <- analysis_results$gene_symbol
+      analysis_results <- rmats_pipeline_state$analysis_results
+      gene_id <- analysis_results$event_info$gene_id
+      gene_symbol <- analysis_results$event_info$gene_symbol
       
       cat("Loading rMATS gene data for:", gene_symbol, "(", gene_id, ")\n")
       
-      # Extract rMATS isoform data from temp files
+      # Extract rMATS isoform data from analysis results
       incProgress(0.5, detail = "Processing rMATS isoforms...")
-      temp_files <- analysis_results$temp_files
+      
+      # Get the current miscleavage setting to load the correct dataframe
+      selected_miscleavage <- input$rmats_miscleavage_type %||% "no_miss_cleavage"
+      
+      if (selected_miscleavage == "no_miss_cleavage") {
+        dataframe_file <- analysis_results$dataframe_file_no_miss %||% analysis_results$dataframe_file
+      } else {
+        dataframe_file <- analysis_results$dataframe_file_2miss %||% analysis_results$dataframe_file
+      }
       
       # Load the RDS data generated by the comprehensive analysis
-      if (file.exists(temp_files$dataframe_file)) {
-        rmats_rds_data <- readRDS(temp_files$dataframe_file)
+      if (file.exists(dataframe_file)) {
+        rmats_rds_data <- readRDS(dataframe_file)
         cat("✓ Loaded rMATS RDS data with", nrow(rmats_rds_data), "isoforms\n")
         
         # Create 24-column data format for compatibility
@@ -5817,40 +6025,114 @@ observeEvent(input$load_rmats_gene, {
         
         incProgress(0.7, detail = "Attempting to merge with existing gene data...")
         
-        # Try to merge with existing gene data
-        available_genes <- get_available_genes()
-        if (gene_id %in% available_genes) {
-          cat("Gene found in existing database - merging data...\n")
-          existing_peptide_data <- get_gene_peptide_data(gene_id)
-          combined_data <- combine_existing_and_rmats_peptide_data(existing_peptide_data, rmats_data_24col)
-          rmats_merged_data(combined_data)
+        cat("🔍 SECOND MERGE HANDLER: Starting merge process\n")
+        cat("🔍 SECOND MERGE HANDLER: Gene ID:", gene_id, "\n")
+        cat("🔍 SECOND MERGE HANDLER: Current rMATS data rows:", nrow(rmats_data_24col), "\n")
+        
+        # Check if we already have merged data from a previous successful merge
+        # BUT allow re-merge if user changed miscleavage type (different dataframe file)
+        current_merged <- rmats_merged_data()
+        current_miscleavage <- input$rmats_miscleavage_type %||% "no_miss_cleavage"
+        
+        cat("🔍 SECOND MERGE HANDLER: Current merged data rows:", if(is.null(current_merged)) "NULL" else nrow(current_merged), "\n")
+        cat("🔍 SECOND MERGE HANDLER: Current miscleavage type:", current_miscleavage, "\n")
+        
+        # Check if this is the same data (same file) as what's already loaded
+        skip_merge <- FALSE
+        if (!is.null(current_merged) && nrow(current_merged) > nrow(rmats_data_24col)) {
+          # Additional check: verify we're loading the same dataframe file
+          # If user changed miscleavage type, we should re-merge with new data
+          cat("🔍 DUPLICATE CHECK: Current merged has", nrow(current_merged), "rows, new rMATS has", nrow(rmats_data_24col), "rows\n")
           
-          # Update dropdowns with combined options
-          transcript_choices <- unique(combined_data$txID)
-          rmats_transcripts <- transcript_choices[grepl("inclusion|exclusion", transcript_choices)]
-          
-          updateSelectInput(session, "rmats_highlight_isoform", 
-                           choices = setNames(transcript_choices, transcript_choices),
-                           selected = if(length(rmats_transcripts) > 0) rmats_transcripts[1] else transcript_choices[1])
-          
-          updateSelectizeInput(session, "rmats_compare_isoforms",
-                              choices = setNames(transcript_choices, transcript_choices),
-                              selected = transcript_choices)
-                              
+          if (exists("last_loaded_rmats_file") && exists("last_rmats_miscleavage")) {
+            current_file <- if (current_miscleavage == "no_miss_cleavage") {
+              analysis_results$dataframe_file_no_miss %||% analysis_results$dataframe_file
+            } else {
+              analysis_results$dataframe_file_2miss %||% analysis_results$dataframe_file
+            }
+            
+            cat("🔍 DUPLICATE CHECK: Comparing files -", "last:", last_loaded_rmats_file, "current:", current_file, "\n")
+            cat("🔍 DUPLICATE CHECK: Comparing miscleavage -", "last:", last_rmats_miscleavage, "current:", current_miscleavage, "\n")
+            
+            if (identical(last_loaded_rmats_file, current_file) && 
+                identical(last_rmats_miscleavage, current_miscleavage)) {
+              skip_merge <- TRUE
+              cat("✅ DUPLICATE CHECK: Already have merged data with", nrow(current_merged), "rows for same miscleavage type - skipping duplicate merge\n")
+            } else {
+              cat("🔄 DUPLICATE CHECK: Miscleavage type or data file changed - proceeding with re-merge\n")
+            }
+          } else {
+            cat("🔍 DUPLICATE CHECK: Tracking variables don't exist - proceeding with merge\n")
+          }
         } else {
-          cat("Gene not found in existing database - using rMATS data only\n")
-          rmats_merged_data(rmats_data_24col)
-          
-          # Update dropdowns with rMATS-only options
-          transcript_choices <- unique(rmats_data_24col$txID)
-          updateSelectInput(session, "rmats_highlight_isoform", 
-                           choices = setNames(transcript_choices, transcript_choices),
-                           selected = transcript_choices[1])
-          
-          updateSelectizeInput(session, "rmats_compare_isoforms",
-                              choices = setNames(transcript_choices, transcript_choices),
-                              selected = transcript_choices)
+          cat("🔍 DUPLICATE CHECK: Merge needed - no current data or new data is larger\n")
         }
+        
+        if (skip_merge) {
+          # Use existing merged data
+          cat("⏭️ SKIP MERGE: Using existing merged data with", nrow(current_merged), "rows\n")
+          cat("⏭️ SKIP MERGE: Transcript choices:", paste(head(unique(current_merged$txID), 5), collapse = ", "), "\n")
+          transcript_choices <- unique(current_merged$txID)
+        } else {
+          # Use the same merge logic as in comprehensive analysis
+          cat("🔍 MERGE PROCESS: Using load_and_merge_gene_data for gene", gene_id, "\n")
+          
+          tryCatch({
+            merged_data <- load_and_merge_gene_data(
+              gene_id = gene_id,
+              novel_data = rmats_data_24col,
+              miscleavage_type = input$rmats_miscleavage_type,
+              rds_dir = "data/genes"
+            )
+            
+            # Store merged data
+            rmats_merged_data(merged_data)
+            
+            cat("✅ MERGE PROCESS: Successfully merged rMATS data with existing gene data\n")
+            cat("✅ MERGE PROCESS: Final merged data:", nrow(merged_data), "rows,", ncol(merged_data), "columns\n")
+            
+            # Update dropdowns with ALL transcripts (rMATS + existing)
+            transcript_choices <- unique(merged_data$txID)
+            rmats_transcripts <- transcript_choices[grepl("\\.(inclusion|exclusion)$", transcript_choices)]
+            existing_transcripts <- transcript_choices[!grepl("\\.(inclusion|exclusion)$", transcript_choices)]
+            
+            cat("✅ MERGE PROCESS: Transcript choices:\n")
+            cat("  Existing:", paste(head(existing_transcripts, 3), collapse = ", "), "\n")
+            cat("  rMATS:", paste(rmats_transcripts, collapse = ", "), "\n")
+            
+          }, error = function(e) {
+            cat("Warning: Could not merge with existing gene data:", e$message, "\n")
+            cat("Falling back to rMATS data only\n")
+            
+            # Fallback to rMATS data only
+            rmats_merged_data(rmats_data_24col)
+            transcript_choices <- unique(rmats_data_24col$txID)
+            cat("⚠️ MERGE PROCESS: rMATS-only transcript choices:", paste(head(transcript_choices, 5), collapse = ", "), "\n")
+          })
+          
+          # Store tracking variables to prevent unnecessary re-merges
+          current_file <- if (current_miscleavage == "no_miss_cleavage") {
+            analysis_results$dataframe_file_no_miss %||% analysis_results$dataframe_file
+          } else {
+            analysis_results$dataframe_file_2miss %||% analysis_results$dataframe_file
+          }
+          cat("💾 TRACKING VARS: Storing file:", current_file, "\n")
+          cat("💾 TRACKING VARS: Storing miscleavage:", current_miscleavage, "\n")
+          assign("last_loaded_rmats_file", current_file, envir = .GlobalEnv)
+          assign("last_rmats_miscleavage", current_miscleavage, envir = .GlobalEnv)
+          cat("💾 TRACKING VARS: Successfully stored tracking variables\n")
+        }
+        
+        rmats_transcripts <- transcript_choices[grepl("inclusion|exclusion", transcript_choices)]
+        
+        updateSelectInput(session, "rmats_highlight_isoform", 
+                         choices = setNames(transcript_choices, transcript_choices),
+                         selected = if(length(rmats_transcripts) > 0) rmats_transcripts[1] else transcript_choices[1])
+        
+        updateSelectizeInput(session, "rmats_compare_isoforms",
+                            choices = setNames(transcript_choices, transcript_choices),
+                            selected = transcript_choices)
+                            
         
         incProgress(1, detail = "Complete!")
         
@@ -5893,5 +6175,6 @@ observeEvent(input$run_rmats_comparative_analysis, {
     )
   })
 })
+
 
 cat("✅ rMATS peptide server logic loaded successfully\n")

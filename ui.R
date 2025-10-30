@@ -408,7 +408,7 @@ ui <- fluidPage(
                           margin-bottom: 0; 
                           font-weight: 500;")
             ),
-            p("Upload transcript sequences to identify novel isoforms and compare against known proteomes with advanced algorithms.",
+            p("Upload transcript sequences to identify novel isoforms and compare against known proteomes",
               style = "font-size: 1.92rem; 
                        line-height: 1.6; 
                        opacity: 0.9; 
@@ -451,7 +451,7 @@ ui <- fluidPage(
                           margin-bottom: 0; 
                           font-weight: 500;")
             ),
-            p("Perform BLASTP searches against comprehensive protein databases with statistical analysis and advanced filtering.",
+            p("Perform peptide searches against protein databases",
               style = "font-size: 1.92rem; 
                        line-height: 1.6; 
                        opacity: 0.9; 
@@ -494,7 +494,7 @@ ui <- fluidPage(
                           margin-bottom: 0; 
                           font-weight: 500;")
             ),
-            p("Comprehensive analysis of alternative splicing events using rMATS with functional consequence prediction.",
+            p("Analysis of alternative splicing events with functional consequence prediction.",
               style = "font-size: 1.92rem; 
                        line-height: 1.6; 
                        opacity: 0.9; 
@@ -1206,11 +1206,43 @@ ui <- fluidPage(
           title = "Novel Transcript Analysis Pipeline",
           status = "primary",
           solidHeader = TRUE,
-          h5("Step 1: Upload FASTA File"),
-          fileInput("novel_fasta_file", "Choose FASTA File",
-                   accept = c(".fa", ".fasta", ".fas", ".txt"),
-                   width = "100%"),
-          helpText("Upload nucleotide sequences (DNA/RNA). Min. 300 nt recommended."),
+          h5("Step 1: Provide FASTA Sequences"),
+          tabsetPanel(
+            id = "novel_input_tabs",
+            type = "tabs",
+            tabPanel("Upload File",
+              br(),
+              fileInput("novel_fasta_file", "Choose FASTA File",
+                       accept = c(".fa", ".fasta", ".fas", ".txt"),
+                       width = "100%"),
+              helpText("Upload nucleotide sequences (DNA/RNA). Min. 300 nt recommended.")
+            ),
+            tabPanel("Paste Sequences", 
+              br(),
+              textAreaInput("novel_fasta_text", "Paste FASTA Sequences:",
+                           placeholder = ">RBMS1|PB.2493.25|1 CDS=372-617\nAGGGCGGTGGTTGAGGCCGCGGTAGGTGGGGACGCGGCGGCGCTGCTCCTCCGCTGCCGCCGGGAGAGTCGGCGACGCCGCCAGCTCCGCGCGCGAACTCCCGTCCATGGCACGCAGGGCGGCGGCTGCCCGAGCTGCTCGAGTCTCGCCCGCTGCCGCGCCGTACTTTTAGGCGAGTGCGGAGGTCGAAGGCGGAGGGGAAGTCAGCGCGGAGCTGCAGCCCCCGCCGGCCGCCGCCGCGCGGCGAGAGGGAGTTCCCAGAGCTGCCGCGGCCCCGGGCCCGGCCGGCCACCTCCTTGCGCCCTCCCCCTCGCGGCGAGGCTGCCCCGCGCCCGCGCCCGCGCCCGCACCCGCCGCCGCCGCCCGCAGCGATGATCTTCCCCAGCAGCAGTGGCAACCCCGGGGGCAGCAGCAACTGCCGGACGCCCTATCGCAAGCAGCAGTCTCTGGTCCCAGCCCACCCCATGGCCCCTCCCAGTCCCAGCACCACCAGCAGTAATAACAACACTAGCAGCAGTAGCAACTCAGGATGGGATCAGCTCAGCAAAACGAACCTCTATATCCGAGGACTGCCTCCCCACACCACCGACCAGGACCTGGTGAAGCTCTGTCAACCGT...",
+                           rows = 8, width = "100%"),
+              helpText("Paste FASTA formatted sequences. Include headers (>sequence_name). Min. 300 nt recommended.")
+            )
+          ),
+          # JavaScript to clear opposing input when one is used
+          tags$script(HTML("
+            $(document).ready(function() {
+              // Clear text input when file is selected
+              $('#novel_fasta_file').on('change', function() {
+                if (this.files && this.files.length > 0) {
+                  $('#novel_fasta_text').val('');
+                }
+              });
+              
+              // Clear file input when text is entered
+              $('#novel_fasta_text').on('input', function() {
+                if ($(this).val().trim() !== '') {
+                  $('#novel_fasta_file').val('');
+                }
+              });
+            });
+          ")),
           h5("Step 2: Analysis Parameters"),
           fluidRow(
             column(3,
@@ -1463,9 +1495,9 @@ ui <- fluidPage(
           fluidRow(
             column(3,
               numericInput("peptide_search_evalue", "E-value Threshold:",
-                         value = 0.01, min = 0.0001, max = 10, step = 0.001,
+                         value = 10, min = 0.0001, max = 50000, step = 1000,
                          width = "100%"),
-              helpText("Lower values = more stringent (0.01 recommended)")
+              helpText("Higher values for short peptides (20000 recommended for ≥6 AA)")
             ),
             column(3,
               numericInput("peptide_search_identity", "Min Identity %:",
@@ -1535,50 +1567,89 @@ ui <- fluidPage(
         )
       ),
       
-      # Perfect Match Info Panel
+      # Multi-Gene BLAST Visualization Panel (≥100% Identity)
       fluidRow(
         conditionalPanel(
-          condition = "output.blast_perfect_match_selected",
+          condition = "output.blast_perfect_matches_available",
           box(
-            title = "100% Perfect Match Found", 
+            title = "Multi-Gene BLAST Visualization (100% Identity Matches)", 
             status = "success",
             solidHeader = TRUE,
             width = 12,
             div(
               style = "background-color: #d4edda; padding: 15px; margin-bottom: 15px; border-left: 4px solid #28a745; border-radius: 5px;",
-              h5("🎯 100% Perfect Match Selected", style = "margin-top: 0; color: #155724;"),
-              textOutput("blast_selected_info"),
+              h5("🎯 100% Perfect Matches Found", style = "margin-top: 0; color: #155724;"),
+              textOutput("blast_perfect_matches_summary"),
               br(),
-              actionButton("show_blast_visualization", 
-                         "Show Transcript Visualization",
-                         icon = icon("dna"),
-                         style = "color: #fff; background-color: #28a745; border-color: #1e7e34; font-weight: bold;")
+              
+              # Controls for multi-gene visualization
+              fluidRow(
+                column(3,
+                  selectInput("blast_viz_enzyme", 
+                            "Select Enzyme:",
+                            choices = list(
+                              "Trypsin" = "trp",
+                              "Chymotrypsin" = "chymo", 
+                              "Asp-N" = "aspn",
+                              "Lys-C" = "lysc",
+                              "Lys-N" = "lysn",
+                              "Glu-C" = "gluc"
+                            ),
+                            selected = "trp")
+                ),
+                column(3,
+                  selectInput("blast_viz_miscleavage",
+                            "Miscleavage:",
+                            choices = list(
+                              "None" = "no_miss_cleavage",
+                              "Up to 2" = "upto_two_misscleavage"
+                            ),
+                            selected = "no_miss_cleavage")
+                ),
+                column(3,
+                  radioButtons("blast_viz_intron_scale",
+                             "Intron Display:",
+                             choices = list(
+                               "Compressed" = "compressed",
+                               "True scale" = "true_scale"
+                             ),
+                             selected = "compressed",
+                             inline = TRUE)
+                ),
+                column(3,
+                  br(),
+                  actionButton("generate_multi_gene_blast_viz", 
+                             "Generate Visualization",
+                             icon = icon("dna"),
+                             style = "color: #fff; background-color: #28a745; border-color: #1e7e34; font-weight: bold; width: 100%;")
+                )
+              )
             )
           )
         )
       ),
       
-      # Advanced Transcript Visualization
+      # Multi-Gene BLAST Visualization Output (Tab-Based)
       fluidRow(
         conditionalPanel(
-          condition = "output.blast_visualization_visible",
+          condition = "output.multi_gene_blast_viz_available",
           box(
-            title = "Perfect Match Transcript Visualization", 
+            title = "Multi-Gene BLAST Visualization", 
             status = "success",
             solidHeader = TRUE,
             width = 12,
             div(
               style = "background-color: #f8f9fa; padding: 10px; margin-bottom: 15px; border-radius: 5px;",
-              actionButton("hide_blast_visualization", "Hide Visualization", 
+              actionButton("hide_multi_gene_blast_viz", "Hide Visualization", 
                          icon = icon("eye-slash"),
                          style = "color: #6c757d; background-color: #e9ecef; border-color: #ced4da; float: right;")
             ),
-            withSpinner(
-              plotlyOutput("blast_transcript_plot", height = "750px"),
-              type = 8, color = "#28a745"
-            ),
+            
+            # Gene tabs
+            uiOutput("gene_tabs_ui"),
+            
             br(),
-            downloadButton("download_blast_plot", "Download Transcript Plot",
+            downloadButton("download_multi_gene_blast_plot", "Download Current Gene Plot",
                          icon = icon("download"),
                          style = "color: #fff; background-color: #28a745; border-color: #1e7e34;")
           )

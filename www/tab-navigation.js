@@ -7,6 +7,7 @@
 $(document).ready(function() {
   // Initialize active tab
   $('.tab-overview').addClass('active');
+  $('.tab-rmats').addClass('active');
   
   // Handle tab clicks
   $('.tab-btn').on('click', function() {

@@ -184,6 +184,12 @@ find_gene_file_with_version <- function(gene_id, miscleavage_type = "no_miss_cle
 #' @return List containing peptides and AS events for the gene
 #'
 load_gene_data <- function(gene_id, miscleavage_type = "no_miss_cleavage", data_dir = "data") {
+  # DEBUG: Show function entry parameters
+  cat("🔍🔍🔍 LOAD_GENE_DATA DEBUG START 🔍🔍🔍\n")
+  cat("📝 Requested gene_id:", gene_id, "\n")
+  cat("📝 Requested miscleavage_type:", miscleavage_type, "\n")
+  cat("📝 Requested data_dir:", data_dir, "\n")
+  
   # Validate miscleavage_type
   if (!miscleavage_type %in% c("no_miss_cleavage", "upto_two_misscleavage")) {
     stop("miscleavage_type must be either 'no_miss_cleavage' or 'upto_two_misscleavage'")
@@ -192,9 +198,13 @@ load_gene_data <- function(gene_id, miscleavage_type = "no_miss_cleavage", data_
   # Use flexible file lookup for peptide file
   peptide_file <- find_gene_file_with_version(gene_id, miscleavage_type, data_dir)
   if (is.null(peptide_file)) {
+    cat("❌ LOAD_GENE_DATA: No file found for gene", gene_id, "with miscleavage type", miscleavage_type, "\n")
     warning("Peptide file not found for gene ", gene_id, " with miscleavage type ", miscleavage_type)
     return(NULL)
   }
+  
+  # DEBUG: Show which file was found
+  cat("📂 FOUND peptide file:", peptide_file, "\n")
   
   # For AS events, use flexible lookup based on the found peptide file's gene ID
   # Extract the actual gene ID with version from the found peptide file
@@ -202,13 +212,24 @@ load_gene_data <- function(gene_id, miscleavage_type = "no_miss_cleavage", data_
   as_events_file <- file.path(data_dir, "as_events", paste0(actual_gene_id, ".rds"))
   
   # Load peptides
+  cat("📊 LOADING peptide data from:", peptide_file, "\n")
   gene_peptides <- readRDS(peptide_file)
+  
+  # DEBUG: Show loaded data characteristics
+  cat("📈 LOADED gene peptides - rows:", nrow(gene_peptides), "cols:", ncol(gene_peptides), "\n")
+  file_info <- file.info(peptide_file)
+  cat("📏 FILE SIZE:", file_info$size, "bytes\n")
   
   # Load AS events if available (shared between miscleavage types)
   gene_as_events <- NULL
   if (file.exists(as_events_file)) {
     gene_as_events <- readRDS(as_events_file)
   }
+  
+  # DEBUG: Show final return information
+  cat("✅ RETURNING gene data with miscleavage_type:", miscleavage_type, "\n")
+  cat("✅ Peptides rows:", nrow(gene_peptides), "AS events:", if(is.null(gene_as_events)) "NULL" else nrow(gene_as_events), "\n")
+  cat("🔍🔍🔍 LOAD_GENE_DATA DEBUG END 🔍🔍🔍\n")
   
   # Return as list
   return(list(
