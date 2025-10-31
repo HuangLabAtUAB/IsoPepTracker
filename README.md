@@ -1,6 +1,6 @@
 # IsoPepTracker
 
-![IsoPepTracker](isopeptracker_white.png)
+![IsoPepTracker](isopeptracker.png)
 
 ![GitHub](https://img.shields.io/github/stars/HuangLabAtUAB/IsoPepTracker?style=social)
 ![License](https://img.shields.io/github/license/HuangLabAtUAB/IsoPepTracker)
