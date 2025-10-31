@@ -1,5 +1,7 @@
 # IsoPepTracker
 
+![IsoPepTracker](isopeptracker_white.png)
+
 ![GitHub](https://img.shields.io/github/stars/HuangLabAtUAB/IsoPepTracker?style=social)
 ![License](https://img.shields.io/github/license/HuangLabAtUAB/IsoPepTracker)
 ![R](https://img.shields.io/badge/R-%23276DC3?logo=r&logoColor=white)
@@ -32,6 +34,7 @@
   - [SplAdder Output](#spladder-output-files)
 - [Getting Help](#getting-help)
 - [Citation](#citation)
+- [License](#license)
 - [Acknowledgments](#acknowledgments)
 
 ---
@@ -239,6 +242,10 @@ For issues, questions, or feature requests:
 If you use IsoPepTracker in your research, please cite:
 
 
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## Acknowledgments
 
