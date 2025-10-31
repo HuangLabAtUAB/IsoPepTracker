@@ -1,9 +1,8 @@
 # IsoPepTracker
 
-**A Comprehensive Shiny Application for Alternative Splicing Analysis and Peptide Mapping**
+**A Shiny Application for Alternative Splicing Analysis and Peptide Mapping**
 
-IsoPepTracker is an bioinformatics tool designed to visualize and analyze alternative splicing events, map peptides to genomic coordinates, and compare protein isoforms at the peptide level. The application provides interactive visualizations for understanding how alternative splicing affects protein diversity and peptide generation across different proteolytic digestion scenarios.
-
+IsoPepTracker is a bioinformatics tool designed to visualize and analyze alternative splicing events, map peptides to genomic coordinates, and compare protein isoforms at the peptide level. The application provides interactive visualizations for understanding how alternative splicing affects protein diversity and peptide generation across different proteolytic digestion scenarios.
 
 
 ## Features
@@ -14,6 +13,13 @@ IsoPepTracker is an bioinformatics tool designed to visualize and analyze altern
 - **Novel Isoform Analysis**: Identify and analyze novel peptides from novel isoforms
 - **BLASTP Integration**: Search peptides against protein databases for functional annotation
 - **AS tools Support**: Process and visualize rMATS and SplAdder alternative splicing functional predictions
+
+  ##Web portal accessment
+  https://www.isopeptracker.org/ 
+
+## Below shows how to configure 
+```R IsoPepTracker ``` 
+in the local environment.
 
 ## Prerequisites
 
