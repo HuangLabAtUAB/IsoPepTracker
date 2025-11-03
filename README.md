@@ -1,6 +1,6 @@
 # IsoPepTracker
 
-
+![IsoPepTracker](isopeptracker.png)
 
 ![GitHub](https://img.shields.io/github/stars/HuangLabAtUAB/IsoPepTracker?style=social)
 ![License](https://img.shields.io/github/license/HuangLabAtUAB/IsoPepTracker)
@@ -13,7 +13,6 @@
 
 **Web Portal (recommended)**: [https://www.isopeptracker.org](https://www.isopeptracker.org)
 
-![IsoPepTracker](isopeptracker.png)
 
 ---
 
@@ -86,15 +85,18 @@ BiocManager::install(c(
 
 ```
 
-```
+### External Tools
 
+Install required external tools:
+
+```bash
 apt install minimap2 samtools transdecoder stringtie gffread ncbi-blast+
-
-
-
 ```
 
 ## Required Database Files
+
+📁 **Database Download**: All required databases are available at:  
+[Google Drive - IsoPepTracker Databases](https://drive.google.com/drive/folders/1oxmvASpP8WI61bY7jTn4t7y-vmdqtG9b?usp=sharing)
 
 The application requires several pre-built database files to function properly:
 
@@ -124,82 +126,46 @@ The application requires several pre-built database files to function properly:
 
 ## Usage
 
-
-
 ### Starting the Application
 
-
-
 1. Ensure all required database files are in place
-
 2. Open R or RStudio
-
 3. Set your working directory to the IsoPepTracker folder
-
 4. Run the application:
 
-
-
 ```R
-
 # Option 1: Direct execution
-
 shiny::runApp("app.R")
 
-
-
 # Option 2: From RStudio
-
 # Open app.R and click "Run App"
 
-
-
 # Option 3: With specific options
-
 shiny::runApp("app.R", host = "0.0.0.0", port = 3838)
 
 ```
 
 ### Navigation
 
-
-
 The application features a card-based navigation system with the following main sections:
 
-
-
 1. **Gene Overview**: Search and select genes, view basic statistics
-
 2. **Multi-Isoform Comparison**: Compare peptides across transcript isoforms
-
 3. **Alternative Splicing Analysis**: Visualize AS events and their peptide consequences
-
 4. **Novel Isoform Analysis**: Analyze novel peptides from AS events
-
 5. **Peptide Search**: BLASTP-based peptide searching
-
 6. **rMATS Analysis**: Process and visualize rMATS output files
-
 7. **SplAdder Analysis**: Process SplAdder predictions
-
-
 
 ### Typical Workflow
 
 1. **Gene Selection**: Use the search box to find your gene of interest
-
 2. **Choose Analysis Type**: Select between different analysis modules
-
 3. **Configure Parameters**: 
-
    - Select protease (Trypsin, Chymotrypsin, etc.)
-
    - Choose miscleavage allowance (0 or up to 2)
-
    - Set visualization preferences
-
 4. **Interactive Exploration**: Click, hover, and zoom on visualizations
-
 5. **Export Results**: Download tables, plots, and analysis results
 
 
@@ -238,12 +204,12 @@ For issues, questions, or feature requests:
 
 ## Citation
 
-
 If you use IsoPepTracker in your research, please cite:
 
-
+```
+[Citation will be added upon publication]
+```
 
 ## Acknowledgments
-
 
 Developed at the Huang Lab, University of Alabama at Birmingham.
