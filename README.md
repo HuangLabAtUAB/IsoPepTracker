@@ -110,14 +110,13 @@ The application requires several pre-built database files to function properly:
 
 - `data/as_events/ENSG*.rds` - Alternative splicing events for each gene
 
-#### 2. **GTF and Genomic Annotation Files**
-
-- `data/gtf_cache/` - Pre-processed GTF cache directory (optional but highly recommended)
-
-  - Run `Rscript build_cache.R` to generate for 150x faster visualizations
+- `data/gtf_cache/` - Pre-processed GTF cache directory 
 
 - `data/gene_boundaries.rds` - Gene boundary coordinates database
 
+#### 2. **Reference files**
+
+-`reference/`- Reference files for BLAST and minimap2
 
 #### 3. **rMATS-Specific Files**
 
