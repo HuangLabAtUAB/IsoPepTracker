@@ -56,8 +56,8 @@
 
 ### System Requirements
 - **R** ≥ 4.0
-- **RStudio** (recommended for development)
-- **RAM**: 8 GB minimum (16 GB recommended for large datasets)
+- **RStudio** 
+- **RAM**: 8 GB minimum 
 - **Disk**: 10 GB free space for databases and cache
 
 ### Required R Packages
