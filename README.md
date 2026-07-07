@@ -205,9 +205,7 @@ For issues, questions, or feature requests:
 
 If you use IsoPepTracker in your research, please cite:
 
-```
-[Citation will be added upon publication]
-```
+[IsoPepTracker: An interactive web application for peptide-driven isoform analysis, PLoS Comput Biol, 2026, PMID: 42234655](https://pubmed.ncbi.nlm.nih.gov/42234655/)
 
 ## Acknowledgments
 
