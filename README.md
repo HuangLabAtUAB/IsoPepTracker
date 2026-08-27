@@ -12,7 +12,7 @@
 **IsoPepTracker** is a powerful bioinformatics tool designed to **visualize alternative splicing events**, **map peptides to genomic coordinates**, and **compare protein isoforms at the peptide level**. It provides interactive visualizations to explore how alternative splicing influences protein diversity and peptide generation under various proteolytic digestion conditions.
 
 **Web Portal (recommended)**: [https://www.isopeptracker.org](https://www.isopeptracker.org)
-
+**Tutorial & Documents**: [https://isopeptracker-docs.readthedocs.io/en/latest/](https://isopeptracker-docs.readthedocs.io/en/latest/)
 
 ---
 
